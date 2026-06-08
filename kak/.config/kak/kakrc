@@ -29,6 +29,23 @@ evaluate-commands %sh{
     fi
 }
 
+declare-option -hidden str c_symbol_at_cursor %{
+    BEGIN {
+        if (col < 1) col = 1
+        if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
+            col--
+        start = col
+        while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
+            start--
+        end = col
+        while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
+            end++
+        word = substr(line, start, end - start + 1)
+        if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+            print word
+    }
+}
+
 define-command c-definition -docstring 'go to C function definition, falling back to LSP' %{
     evaluate-commands %sh{
         case "$kak_buffile" in
@@ -40,22 +57,8 @@ define-command c-definition -docstring 'go to C function definition, falling bac
 
         line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
         symbol=$(
-            awk -v line="$line" -v col="$kak_cursor_column" '
-                BEGIN {
-                    if (col < 1) col = 1
-                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
-                        col--
-                    start = col
-                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
-                        start--
-                    end = col
-                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
-                        end++
-                    word = substr(line, start, end - start + 1)
-                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
-                        print word
-                }
-            '
+            awk -v line="$line" -v col="$kak_cursor_column" \
+                "$kak_opt_c_symbol_at_cursor"
         )
         [ -n "$symbol" ] || { printf 'lsp-definition\n'; exit 0; }
 
@@ -95,22 +98,8 @@ define-command c-references -docstring 'show C symbol references with ripgrep, f
 
         line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
         symbol=$(
-            awk -v line="$line" -v col="$kak_cursor_column" '
-                BEGIN {
-                    if (col < 1) col = 1
-                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
-                        col--
-                    start = col
-                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
-                        start--
-                    end = col
-                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
-                        end++
-                    word = substr(line, start, end - start + 1)
-                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
-                        print word
-                }
-            '
+            awk -v line="$line" -v col="$kak_cursor_column" \
+                "$kak_opt_c_symbol_at_cursor"
         )
         [ -n "$symbol" ] || { printf 'lsp-references\n'; exit 0; }
 
@@ -135,22 +124,8 @@ define-command c-hover -docstring 'show C declaration or definition summary, fal
 
         line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
         symbol=$(
-            awk -v line="$line" -v col="$kak_cursor_column" '
-                BEGIN {
-                    if (col < 1) col = 1
-                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
-                        col--
-                    start = col
-                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
-                        start--
-                    end = col
-                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
-                        end++
-                    word = substr(line, start, end - start + 1)
-                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
-                        print word
-                }
-            '
+            awk -v line="$line" -v col="$kak_cursor_column" \
+                "$kak_opt_c_symbol_at_cursor"
         )
         [ -n "$symbol" ] || { printf 'lsp-hover\n'; exit 0; }
 
