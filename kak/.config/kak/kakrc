@@ -220,6 +220,83 @@ hook global WinSetOption filetype=grep %{
     }
 }
 
+declare-option str ft42_header_name %sh{ printf '%s' "${USER:-unknown}" }
+declare-option str ft42_header_email %sh{ printf '%s@student.42.fr' "${USER:-unknown}" }
+declare-option -hidden bool ft42_header_inserted false
+
+define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            *.c|*.h) ;;
+            *) printf "fail '42 header is only for .c and .h files'\n"; exit 0 ;;
+        esac
+
+        if [ "$kak_opt_ft42_header_inserted" = true ]; then
+            printf "fail '42 header already exists'\n"
+            exit 0
+        fi
+
+        if [ -f "$kak_buffile" ] &&
+            head -n 1 "$kak_buffile" | grep -Eq '^/\* \*{74} \*/$'; then
+            printf "fail '42 header already exists'\n"
+            exit 0
+        fi
+
+        kakquote() {
+            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
+        }
+
+        file=${kak_buffile##*/}
+        name=${kak_opt_ft42_header_name:-${USER:-unknown}}
+        email=${kak_opt_ft42_header_email:-${name}@student.42.fr}
+        now=$(date '+%Y/%m/%d %H:%M:%S')
+        by="$name <$email>"
+        created="$now by $name"
+        updated="$now by $name"
+
+        header=$(
+            printf '/* ************************************************************************** */\n'
+            printf '/*                                                                            */\n'
+            printf '/*                                                        :::      ::::::::   */\n'
+            printf '/*   %-51s:+:      :+:    :+:   */\n' "$file"
+            printf '/*                                                    +:+ +:+         +:+     */\n'
+            printf '/*   By: %-43s+#+  +:+       +#+        */\n' "$by"
+            printf '/*                                                +#+#+#+#+#+   +#+           */\n'
+            printf '/*   Created: %-41s#+#    #+#             */\n' "$created"
+            printf '/*   Updated: %-40s###   ########.fr       */\n' "$updated"
+            printf '/*                                                                            */\n'
+            printf '/* ************************************************************************** */\n'
+            printf '\n'
+        )
+
+        printf 'evaluate-commands -save-regs a %%{\n'
+        printf '    set-register a %s\n' "$(kakquote "$header")"
+        printf '    execute-keys gg"aP\n'
+        printf '    set-option buffer ft42_header_inserted true\n'
+        printf '}\n'
+    }
+}
+
+define-command add42header -docstring 'insert 42 header in .c or .h buffer' %{
+    add-42-header
+}
+
+define-command -hidden add-42-header-if-empty %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            *.c|*.h) ;;
+            *) exit 0 ;;
+        esac
+
+        if [ ! -e "$kak_buffile" ] || [ ! -s "$kak_buffile" ]; then
+            printf 'add-42-header\n'
+        fi
+    }
+}
+
+hook global BufNewFile .*\.[ch]$ %{ add-42-header-if-empty }
+hook global BufOpenFile .*\.[ch]$ %{ add-42-header-if-empty }
+
 evaluate-commands %sh{
     [ -f "$kak_config/local.kak" ] && printf 'source %%|%s|\n' "$kak_config/local.kak"
 }
