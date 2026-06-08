@@ -6,6 +6,11 @@ colorscheme default
 add-highlighter global/ show-matching -previous
 add-highlighter global/line-numbers number-lines
 
+hook global WinSetOption filetype=c %{
+    set-option buffer indentwidth 0
+    set-option buffer tabstop 2
+}
+
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
         printf "%s" "$kak_selections" | pbcopy
