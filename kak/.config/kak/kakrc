@@ -4,6 +4,7 @@ set global autoreload yes
 colorscheme default
 
 add-highlighter global/ show-matching -previous
+add-highlighter global/line-numbers number-lines
 
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
