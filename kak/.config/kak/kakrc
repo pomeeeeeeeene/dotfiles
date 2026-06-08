@@ -187,6 +187,16 @@ define-command c-hover -docstring 'show C declaration or definition summary, fal
     }
 }
 
+hook global InsertCompletionShow .* %{
+    map window insert <tab> <c-n>
+    map window insert <s-tab> <c-p>
+}
+
+hook global InsertCompletionHide .* %{
+    unmap window insert <tab>
+    unmap window insert <s-tab>
+}
+
 map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'
 map global normal <c-r> '<esc>:c-references<ret>' -docstring 'show references'
 map global normal <c-y> '<esc>:buffer *grep*<ret>' -docstring 'return to references'
