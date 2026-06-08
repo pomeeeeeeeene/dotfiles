@@ -203,3 +203,7 @@ hook global WinSetOption filetype=grep %{
         unmap window normal <c-y>
     }
 }
+
+evaluate-commands %sh{
+    [ -f "$kak_config/local.kak" ] && printf 'source %%|%s|\n' "$kak_config/local.kak"
+}
