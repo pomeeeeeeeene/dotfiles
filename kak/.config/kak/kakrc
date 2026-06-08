@@ -5,8 +5,8 @@ colorscheme default
 
 require-module c-family
 
-add-highlighter -override shared/c/code/functions regex %{\b(?!(?:if|for|while|switch|return|sizeof|alignof|offsetof)\b)([A-Za-z_][A-Za-z0-9_]*)\h*(?=\()} 1:function
-add-highlighter -override shared/cpp/code/functions regex %{\b(?!(?:if|for|while|switch|catch|return|sizeof|alignof|decltype|noexcept|static_cast|const_cast|reinterpret_cast|dynamic_cast|typeid)\b)([A-Za-z_][A-Za-z0-9_]*)\h*(?=\()} 1:function
+add-highlighter -override shared/c/code/functions regex %{^\h*(?:[A-Za-z_][A-Za-z0-9_]*\h+|[*]\h*)+([A-Za-z_][A-Za-z0-9_]*)\h*\(} 1:function
+add-highlighter -override shared/cpp/code/functions regex %{^\h*(?:[A-Za-z_][A-Za-z0-9_]*\h+|[*&:<>]\h*)+([A-Za-z_][A-Za-z0-9_]*)\h*\(} 1:function
 
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
