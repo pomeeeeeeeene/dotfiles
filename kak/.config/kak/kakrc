@@ -3,6 +3,8 @@ set global autoreload yes
 
 colorscheme default
 
+add-highlighter global/ show-matching -previous
+
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
         printf "%s" "$kak_selections" | pbcopy
