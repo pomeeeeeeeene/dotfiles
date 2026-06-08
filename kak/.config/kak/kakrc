@@ -3,11 +3,6 @@ set global autoreload yes
 
 colorscheme default
 
-require-module c-family
-
-add-highlighter -override shared/c/code/functions regex %{^\h*(?:[A-Za-z_][A-Za-z0-9_]*\h+|[*]\h*)+([A-Za-z_][A-Za-z0-9_]*)\h*\(} 1:function
-add-highlighter -override shared/cpp/code/functions regex %{^\h*(?:[A-Za-z_][A-Za-z0-9_]*\h+|[*&:<>]\h*)+([A-Za-z_][A-Za-z0-9_]*)\h*\(} 1:function
-
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
         printf "%s" "$kak_selections" | pbcopy
@@ -28,6 +23,20 @@ evaluate-commands %sh{
         printf '        [clangd]\n'
         printf '        args = ["--log=error", "--background-index"]\n'
         printf '        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]\n'
+        printf '    }\n'
+        printf '}\n'
+        printf 'set-option global lsp_semantic_tokens %%{\n'
+        printf '    [\n'
+        printf '        {face="function", token="function"},\n'
+        printf '        {face="function", token="method"},\n'
+        printf '    ]\n'
+        printf '}\n'
+        printf 'hook global WinSetOption filetype=(?:c|cpp) %%{\n'
+        printf '    hook window -group semantic-tokens BufReload .* lsp-semantic-tokens\n'
+        printf '    hook window -group semantic-tokens NormalIdle .* lsp-semantic-tokens\n'
+        printf '    hook window -group semantic-tokens InsertIdle .* lsp-semantic-tokens\n'
+        printf '    hook -once -always window WinSetOption filetype=.* %%{\n'
+        printf '        remove-hooks window semantic-tokens\n'
         printf '    }\n'
         printf '}\n'
         printf 'lsp-enable\n'
