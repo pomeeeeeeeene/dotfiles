@@ -1,0 +1,207 @@
+set global ui_options ncurses_assistant=cat
+set global autoreload yes
+
+colorscheme default
+
+define-command -override clipboard-yank %{
+    evaluate-commands %sh{
+        printf "%s" "$kak_selections" | pbcopy
+    }
+}
+
+define-command -override clipboard-paste %{
+    execute-keys -draft %sh{
+        printf 'i%s' "$(pbpaste | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    }
+}
+
+eval %sh{kak-lsp --kakoune -s $kak_session}
+
+hook global User LSPDefaultConfig=(?:c|cpp|objc) %{
+    set-option buffer lsp_servers %{
+        [clangd]
+        args = ["--log=error", "--background-index"]
+        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]
+    }
+}
+
+lsp-enable
+
+define-command c-definition -docstring 'go to C function definition, falling back to LSP' %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            *.c|*.h|*.cc|*.hh|*.cpp|*.hpp|*.cxx|*.hxx) ;;
+            *) printf 'lsp-definition\n'; exit 0 ;;
+        esac
+
+        [ -f "$kak_buffile" ] || { printf 'lsp-definition\n'; exit 0; }
+
+        line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
+        symbol=$(
+            awk -v line="$line" -v col="$kak_cursor_column" '
+                BEGIN {
+                    if (col < 1) col = 1
+                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
+                        col--
+                    start = col
+                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
+                        start--
+                    end = col
+                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
+                        end++
+                    word = substr(line, start, end - start + 1)
+                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+                        print word
+                }
+            '
+        )
+        [ -n "$symbol" ] || { printf 'lsp-definition\n'; exit 0; }
+
+        dir=${kak_buffile%/*}
+        root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$dir")
+        pattern="^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*[[:space:]*]+|static[[:space:]]+|inline[[:space:]]+|const[[:space:]]+)*${symbol}[[:space:]]*\\("
+
+        match=$(
+            rg -n --no-heading \
+                --glob '*.c' --glob '*.cc' --glob '*.cpp' --glob '*.cxx' \
+                --glob '!*.o' --glob '!*.a' \
+                "$pattern" "$root" 2>/dev/null |
+            awk '$0 !~ /;[[:space:]]*$/ { print; exit }'
+        )
+
+        if [ -z "$match" ]; then
+            printf 'lsp-definition\n'
+            exit 0
+        fi
+
+        file=${match%%:*}
+        rest=${match#*:}
+        target_line=${rest%%:*}
+        file=$(printf '%s' "$file" | sed 's/|/||/g')
+        printf 'edit -existing %%|%s| %s\n' "$file" "$target_line"
+    }
+}
+
+define-command c-references -docstring 'show C symbol references with ripgrep, falling back to LSP' %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            *.c|*.h|*.cc|*.hh|*.cpp|*.hpp|*.cxx|*.hxx) ;;
+            *) printf 'lsp-references\n'; exit 0 ;;
+        esac
+
+        [ -f "$kak_buffile" ] || { printf 'lsp-references\n'; exit 0; }
+
+        line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
+        symbol=$(
+            awk -v line="$line" -v col="$kak_cursor_column" '
+                BEGIN {
+                    if (col < 1) col = 1
+                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
+                        col--
+                    start = col
+                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
+                        start--
+                    end = col
+                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
+                        end++
+                    word = substr(line, start, end - start + 1)
+                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+                        print word
+                }
+            '
+        )
+        [ -n "$symbol" ] || { printf 'lsp-references\n'; exit 0; }
+
+        dir=${kak_buffile%/*}
+        root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$dir")
+        root=$(printf '%s' "$root" | sed 's/|/||/g')
+
+        printf 'require-module grep\n'
+        printf 'set-option window grepcmd %%|rg --column --line-number --no-heading --color=never --glob "*.[ch]" --glob "*.cc" --glob "*.hh" --glob "*.cpp" --glob "*.hpp" --glob "*.cxx" --glob "*.hxx" --glob "!*.o" --glob "!*.a"|\n'
+        printf 'grep -w %%|%s| %%|%s|\n' "$symbol" "$root"
+    }
+}
+
+define-command c-hover -docstring 'show C declaration or definition summary, falling back to LSP' %{
+    evaluate-commands %sh{
+        case "$kak_buffile" in
+            *.c|*.h|*.cc|*.hh|*.cpp|*.hpp|*.cxx|*.hxx) ;;
+            *) printf 'lsp-hover\n'; exit 0 ;;
+        esac
+
+        [ -f "$kak_buffile" ] || { printf 'lsp-hover\n'; exit 0; }
+
+        line=$(sed -n "${kak_cursor_line}p" "$kak_buffile")
+        symbol=$(
+            awk -v line="$line" -v col="$kak_cursor_column" '
+                BEGIN {
+                    if (col < 1) col = 1
+                    if (substr(line, col, 1) !~ /[[:alnum:]_]/ && col > 1)
+                        col--
+                    start = col
+                    while (start > 1 && substr(line, start - 1, 1) ~ /[[:alnum:]_]/)
+                        start--
+                    end = col
+                    while (substr(line, end + 1, 1) ~ /[[:alnum:]_]/)
+                        end++
+                    word = substr(line, start, end - start + 1)
+                    if (word ~ /^[A-Za-z_][A-Za-z0-9_]*$/)
+                        print word
+                }
+            '
+        )
+        [ -n "$symbol" ] || { printf 'lsp-hover\n'; exit 0; }
+
+        dir=${kak_buffile%/*}
+        root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$dir")
+        fn_pattern="^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*[[:space:]*]+|static[[:space:]]+|inline[[:space:]]+|const[[:space:]]+|struct[[:space:]]+|enum[[:space:]]+)*${symbol}[[:space:]]*\\("
+        macro_pattern="^[[:space:]]*#[[:space:]]*define[[:space:]]+${symbol}\\b"
+
+        summary=$(
+            rg -n --no-heading \
+                --glob '*.[ch]' --glob '*.cc' --glob '*.hh' \
+                --glob '*.cpp' --glob '*.hpp' --glob '*.cxx' --glob '*.hxx' \
+                --glob '!*.o' --glob '!*.a' \
+                -e "$fn_pattern" -e "$macro_pattern" "$root" 2>/dev/null |
+            awk '
+                {
+                    line = $0
+                    sub("^[^:]+:", "", line)
+                    sub("^[0-9]+:", "", line)
+                    gsub(/^[ \t]+|[ \t]+$/, "", line)
+                    print $0
+                    count++
+                    if (count >= 8)
+                        exit
+                }
+            '
+        )
+
+        if [ -z "$summary" ]; then
+            printf 'lsp-hover\n'
+            exit 0
+        fi
+
+        summary=$(printf '%s' "$summary" | sed 's/|/||/g')
+        title=$(printf '%s' "$symbol" | sed 's/|/||/g')
+        printf 'info -anchor %s.%s -style above -title %%|%s| %%|%s|\n' \
+            "$kak_cursor_line" "$kak_cursor_column" "$title" "$summary"
+    }
+}
+
+map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'
+map global normal <c-r> '<esc>:c-references<ret>' -docstring 'show references'
+map global normal <c-y> '<esc>:buffer *grep*<ret>' -docstring 'return to references'
+map global normal K '<esc>:c-hover<ret>' -docstring 'show hover'
+map global normal Y ':clipboard-yank<ret>'
+map global normal P ':clipboard-paste<ret>'
+map global normal <c-n> '<a-n>' -docstring 'select previous search match'
+map global normal <c-/> '<a-/>' -docstring 'select previous search match before each selection'
+map global user i '<a-i>' -docstring 'select surrounding inner object'
+
+hook global WinSetOption filetype=grep %{
+    map window normal <c-y> '<c-o>' -docstring 'return to source'
+    hook -once -always window WinSetOption filetype=.* %{
+        unmap window normal <c-y>
+    }
+}
