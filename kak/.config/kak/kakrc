@@ -4,7 +4,7 @@ set global autoreload yes
 colorscheme default
 
 add-highlighter global/ show-matching -previous
-add-highlighter global/line-numbers number-lines
+add-highlighter global/line-numbers number-lines -separator '  '
 
 hook global WinSetOption filetype=c %{
     set-option buffer indentwidth 0
