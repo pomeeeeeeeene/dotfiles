@@ -15,17 +15,19 @@ define-command -override clipboard-paste %{
     }
 }
 
-eval %sh{kak-lsp --kakoune -s $kak_session}
-
-hook global User LSPDefaultConfig=(?:c|cpp|objc) %{
-    set-option buffer lsp_servers %{
-        [clangd]
-        args = ["--log=error", "--background-index"]
-        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]
-    }
+evaluate-commands %sh{
+    if command -v kak-lsp >/dev/null 2>&1; then
+        printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
+        printf 'hook global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
+        printf '    set-option buffer lsp_servers %%{\n'
+        printf '        [clangd]\n'
+        printf '        args = ["--log=error", "--background-index"]\n'
+        printf '        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]\n'
+        printf '    }\n'
+        printf '}\n'
+        printf 'lsp-enable\n'
+    fi
 }
-
-lsp-enable
 
 define-command c-definition -docstring 'go to C function definition, falling back to LSP' %{
     evaluate-commands %sh{
