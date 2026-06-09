@@ -1,0 +1,4 @@
+[mgr]
+# [parent, current, preview]
+# Example tuned for focused file list in cli-notes session.
+ratio = [0, 2, 0]

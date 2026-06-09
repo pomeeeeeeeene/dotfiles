@@ -1,0 +1,59 @@
+[[mgr.prepend_keymap]]
+on = "j"
+run = [ "arrow 1", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Down + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "k"
+run = [ "arrow -1", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Up + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<Down>"
+run = [ "arrow 1", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Down + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<Up>"
+run = [ "arrow -1", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Up + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<PageDown>"
+run = [ "arrow 50%", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "PageDown + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<PageUp>"
+run = [ "arrow -50%", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "PageUp + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<C-d>"
+run = [ "arrow 50%", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Half page down + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<C-u>"
+run = [ "arrow -50%", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Half page up + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = [ "g", "g" ]
+run = [ "arrow top", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Top + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "G"
+run = [ "arrow bot", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Bottom + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<Home>"
+run = [ "arrow top", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "Home + Kakoune preview sync"
+
+[[mgr.prepend_keymap]]
+on = "<End>"
+run = [ "arrow bot", 'shell "$HOME/.local/bin/kak-preview-sync %h"' ]
+desc = "End + Kakoune preview sync"
