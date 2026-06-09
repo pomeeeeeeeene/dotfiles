@@ -7,7 +7,6 @@ GNU Stow で管理する個人用 dotfiles です。
 ```text
 kak/   Kakoune 設定
 yazi/  Kakoune プレビュー連携用の Yazi 設定
-yazi-cli-notes/  cli-notes tmux session 用の Yazi override
 bin/   ~/.local/bin に置く補助スクリプト
 tmux/  tmux 設定
 ```
@@ -17,7 +16,7 @@ tmux/  tmux 設定
 ```sh
 git clone <repo-url> ~/dotfiles
 cd ~/dotfiles
-stow kak yazi yazi-cli-notes bin tmux
+stow kak yazi bin tmux
 ```
 
 リンク先のファイルが既に存在する場合は、事前に退避するか、このリポジトリへ取り込んでください。
@@ -109,7 +108,7 @@ export KAK_SYNC_SCOPE=my-scope # state/log の名前空間
 - `XDG_RUNTIME_DIR`
 - `YAZI_CONFIG_HOME`
 
-`~/.config/yazi-<tmux-session>/` が存在する場合は、通常の `~/.config/yazi/` に session-specific な設定を重ねます。例として `yazi-cli-notes/` パッケージでは `cli-notes` session 用に Yazi の pane ratio だけを上書きしています。
+`~/.config/yazi-<tmux-session>/` が存在する場合は、通常の `~/.config/yazi/` に session-specific な設定を重ねます。個別用途の override は公開用 dotfiles には含めず、ローカル設定として管理します。
 
 また、リポジトリ root に `yazi.toml` がある場合は、tmux 内ではその設定を現在の Yazi 設定へ merge できます。無効化する場合は次を設定します。
 
