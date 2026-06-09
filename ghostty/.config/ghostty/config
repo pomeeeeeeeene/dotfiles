@@ -1,0 +1,23 @@
+background-opacity = 0.6
+
+font-family = Monaco
+font-size = 14
+font-thicken = true
+
+window-padding-x = 8
+window-padding-y = 8
+
+macos-option-as-alt = false
+scrollback-limit = 100000
+
+theme = tokyonight
+term = xterm-256color
+
+copy-on-select = clipboard
+clipboard-write = allow
+
+working-directory = home
+window-inherit-working-directory = false
+tab-inherit-working-directory = false
+window-save-state = never
+shell-integration = zsh

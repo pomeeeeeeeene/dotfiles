@@ -9,6 +9,7 @@ kak/   Kakoune 設定
 yazi/  Kakoune プレビュー連携用の Yazi 設定
 bin/   ~/.local/bin に置く補助スクリプト
 tmux/  tmux 設定
+ghostty/  Ghostty 設定
 ```
 
 ## インストール
@@ -16,7 +17,7 @@ tmux/  tmux 設定
 ```sh
 git clone <repo-url> ~/dotfiles
 cd ~/dotfiles
-stow kak yazi bin tmux
+stow kak yazi bin tmux ghostty
 ```
 
 リンク先のファイルが既に存在する場合は、事前に退避するか、このリポジトリへ取り込んでください。
