@@ -29,7 +29,15 @@ fn main() {
         return;
     }
 
-    let Some(path_arg) = args.get(1) else {
+    let background_run = args.get(1).map(String::as_str) == Some("--background-run");
+    let path_arg_index = if background_run { 2 } else { 1 };
+
+    if !background_run && env::var("KAK_PREVIEW_SYNC_FOREGROUND").is_err() {
+        spawn_background_run(&args);
+        return;
+    }
+
+    let Some(path_arg) = args.get(path_arg_index) else {
         return;
     };
     let path = PathBuf::from(path_arg);
@@ -76,6 +84,23 @@ try %{{ lsp-did-change-config }}"#
         Ok(()) => schedule_semantic_refresh(&state, &session),
         Err(message) => log_warn(&state, Some(&session), &format!("kak -p failed: {message}")),
     }
+}
+
+fn spawn_background_run(args: &[String]) {
+    let Some(path_arg) = args.get(1) else {
+        return;
+    };
+    let Ok(exe) = env::current_exe() else {
+        return;
+    };
+
+    let _ = Command::new(exe)
+        .arg("--background-run")
+        .arg(path_arg)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
 }
 
 fn build_state(path: PathBuf) -> State {
