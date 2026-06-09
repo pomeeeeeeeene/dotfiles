@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_CORE="$SCRIPT_DIR/yazi-session-core"
+GLOBAL_CORE_DEFAULT="${XDG_BIN_HOME:-$HOME/.local/bin}/yazi-session-core"
+
+if [ -n "${YAZI_SESSION_CORE:-}" ]; then
+  if [ ! -x "$YAZI_SESSION_CORE" ]; then
+    echo "YAZI_SESSION_CORE is set but not executable: $YAZI_SESSION_CORE" >&2
+    exit 1
+  fi
+  exec "$YAZI_SESSION_CORE" "$@"
+fi
+
+if [ -x "$LOCAL_CORE" ]; then
+  exec "$LOCAL_CORE" "$@"
+fi
+
+if [ -x "$GLOBAL_CORE_DEFAULT" ]; then
+  exec "$GLOBAL_CORE_DEFAULT" "$@"
+fi
+
+echo "Missing yazi-session-core." >&2
+echo "Checked: $GLOBAL_CORE_DEFAULT and $LOCAL_CORE" >&2
+exit 1

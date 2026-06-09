@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+path="${1:-}"
+[ -n "$path" ] || exit 0
+[ -f "$path" ] || exit 0
+
+client="${KAK_CLIENT:-preview}"
+state_root="${TMPDIR:-/tmp}"
+
+sanitize_scope() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+resolve_scope() {
+  if [ -n "${KAK_SYNC_SCOPE:-}" ]; then
+    sanitize_scope "$KAK_SYNC_SCOPE"
+    return 0
+  fi
+
+  if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    local tmux_session
+    tmux_session="$(tmux display-message -p '#S' 2>/dev/null || true)"
+    if [ -n "$tmux_session" ]; then
+      sanitize_scope "$tmux_session"
+      return 0
+    fi
+  fi
+
+  printf 'global'
+}
+
+scope="$(resolve_scope)"
+path_state_file="$state_root/kak-preview-sync-${USER}-${scope}.last"
+session_cache_file="$state_root/kak-preview-sync-${USER}-${scope}.session"
+semantic_state_file="$state_root/kak-preview-sync-${USER}-${scope}.semantic"
+log_file="$state_root/kak-preview-sync-${USER}-${scope}.log"
+
+log_warn() {
+  local message="$1"
+  local socket_root
+  socket_root="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+
+  {
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S %z')" "$message"
+    printf '  scope=%s\n' "$scope"
+    printf '  path=%s\n' "$path"
+    printf '  client=%s\n' "$client"
+    printf '  session=%s\n' "${session:-<unset>}"
+    printf '  tmux_session=%s\n' "$(tmux display-message -p '#S' 2>/dev/null || printf '<unset>')"
+    printf '  TMPDIR=%s\n' "${TMPDIR:-<unset>}"
+    printf '  XDG_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR:-<unset>}"
+    printf '  socket=%s/kakoune-%s/%s\n' "$socket_root" "$USER" "${session:-<unset>}"
+    printf '\n'
+  } >> "$log_file"
+}
+
+find_upward_file() {
+  local dir="$1"
+  local name="$2"
+
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    if [ -f "$dir/$name" ]; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+    dir="${dir%/*}"
+  done
+
+  return 1
+}
+
+find_project_root() {
+  local file="$1"
+  local dir
+
+  dir="${file%/*}"
+
+  find_upward_file "$dir" compile_commands.json && return 0
+  find_upward_file "$dir" Makefile && return 0
+
+  if command -v git >/dev/null 2>&1; then
+    git -C "$dir" rev-parse --show-toplevel 2>/dev/null && return 0
+  fi
+
+  printf '%s\n' "$dir"
+}
+
+compile_db_has_file() {
+  local db="$1"
+  local file="$2"
+
+  [ -f "$db" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  jq -e --arg file "$file" '
+    def absfile:
+      if (.file | startswith("/")) then .file
+      else (.directory + "/" + .file)
+      end;
+    any(.[]?; absfile == $file)
+  ' "$db" >/dev/null 2>&1
+}
+
+ensure_compile_commands_cache() {
+  local file="$1"
+  local root cache_base cache_key cache_dir out tmp_base tmp_gen tmp_out sources
+
+  case "$file" in
+    *.c|*.h|*.cc|*.hh|*.cpp|*.hpp|*.cxx|*.hxx) ;;
+    *) return 1 ;;
+  esac
+
+  command -v jq >/dev/null 2>&1 || return 1
+
+  root="$(find_project_root "$file")" || return 1
+  [ -n "$root" ] || return 1
+
+  cache_base="${XDG_CACHE_HOME:-$HOME/.cache}/kak-preview-sync/clangd"
+  cache_key="$(printf '%s' "$root" | cksum | awk '{ print $1 }')"
+  cache_dir="$cache_base/$(basename "$root")-$cache_key"
+  out="$cache_dir/compile_commands.json"
+  mkdir -p "$cache_dir" || return 1
+
+  if compile_db_has_file "$out" "$file" &&
+    { [ ! -f "$root/compile_commands.json" ] || [ "$out" -nt "$root/compile_commands.json" ]; }; then
+    printf '%s|%s\n' "$root" "$cache_dir"
+    return 0
+  fi
+
+  tmp_base="$(mktemp "$cache_dir/base.XXXXXX")" || return 1
+  tmp_gen="$(mktemp "$cache_dir/generated.XXXXXX")" || { rm -f "$tmp_base"; return 1; }
+  tmp_out="$(mktemp "$cache_dir/compile_commands.XXXXXX")" || { rm -f "$tmp_base" "$tmp_gen"; return 1; }
+  sources="$(mktemp "$cache_dir/sources.XXXXXX")" || { rm -f "$tmp_base" "$tmp_gen" "$tmp_out"; return 1; }
+
+  if [ -f "$root/compile_commands.json" ]; then
+    jq '.' "$root/compile_commands.json" > "$tmp_base" 2>/dev/null || printf '[]\n' > "$tmp_base"
+  else
+    printf '[]\n' > "$tmp_base"
+  fi
+
+  find "$root" \
+    \( -name .git -o -name .cache -o -name build -o -name cmake-build-debug -o -name cmake-build-release \) -type d -prune \
+    -o -type f -name '*.c' -print > "$sources"
+
+  jq -Rn --arg root "$root" '
+    [
+      inputs
+      | select(length > 0)
+      | {
+          directory: $root,
+          file: .,
+          arguments: [
+            "cc", "-Wall", "-Wextra", "-Werror",
+            "-I.", "-Ilibft",
+            "-c", ., "-o", "/dev/null"
+          ],
+          output: "/dev/null"
+        }
+    ]
+  ' < "$sources" > "$tmp_gen" || { rm -f "$tmp_base" "$tmp_gen" "$tmp_out" "$sources"; return 1; }
+
+  jq -s '
+    def absfile:
+      if (.file | startswith("/")) then .file
+      else (.directory + "/" + .file)
+      end;
+    (.[0] // []) as $base
+    | ([ $base[]? | absfile ]) as $existing
+    | $base + ((.[1] // []) | map(select(.file as $file | ($existing | index($file) | not))))
+  ' "$tmp_base" "$tmp_gen" > "$tmp_out" || { rm -f "$tmp_base" "$tmp_gen" "$tmp_out" "$sources"; return 1; }
+
+  mv "$tmp_out" "$out" || { rm -f "$tmp_base" "$tmp_gen" "$tmp_out" "$sources"; return 1; }
+  rm -f "$tmp_base" "$tmp_gen" "$sources"
+
+  printf '%s|%s\n' "$root" "$cache_dir"
+}
+
+toml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+schedule_semantic_refresh() {
+  local token="$1"
+  local target_session="$2"
+  local target_client="$3"
+  local delay="${KAK_PREVIEW_SYNC_DEBOUNCE:-0.18}"
+
+  printf '%s\n' "$token" > "$semantic_state_file"
+
+  (
+    sleep "$delay"
+
+    current_token="$(cat "$semantic_state_file" 2>/dev/null || true)"
+    [ "$current_token" = "$token" ] || exit 0
+
+    semantic_cmd='try %{ add-highlighter -override window/lsp_semantic_tokens_ranges ranges lsp_semantic_tokens_ranges }
+try %{ lsp-did-change }
+try %{ set-option buffer lsp_semantic_tokens_timestamp -1 }
+try %{ lsp-semantic-tokens }'
+    cmd="try %{ eval -client $target_client %{ $semantic_cmd } } catch %{ eval -client client0 %{ $semantic_cmd } }"
+    printf '%s\n' "$cmd" | kak -p "$target_session" >/dev/null 2>/dev/null || true
+  ) >/dev/null 2>&1 &
+}
+
+# Avoid repeating the same open request while cursor stays on the same file.
+if [ -f "$path_state_file" ]; then
+  last_path="$(cat "$path_state_file" 2>/dev/null || true)"
+  [ "$last_path" = "$path" ] && exit 0
+fi
+printf '%s' "$path" > "$path_state_file"
+
+list_live_sessions() {
+  kak -l 2>/dev/null | sed -E '/ \(dead\)$/d' || true
+}
+
+is_live_session() {
+  local session_name="$1"
+  [ -n "$session_name" ] || return 1
+  list_live_sessions | awk -v s="$session_name" '$0 == s { found = 1 } END { exit(found ? 0 : 1) }'
+}
+
+extract_session_from_text() {
+  # Parse patterns like: client0@[dev]
+  sed -nE 's/.*@\[([^][]+)\].*/\1/p' | tail -n 1
+}
+
+resolve_from_tmux() {
+  [ -n "${TMUX:-}" ] || return 1
+  command -v tmux >/dev/null 2>&1 || return 1
+
+  local panes line pane_id pane_cmd pane_title candidate captured
+  panes="$(tmux list-panes -F '#{pane_id}|#{pane_current_command}|#{pane_title}' 2>/dev/null || true)"
+  [ -n "$panes" ] || return 1
+
+  while IFS='|' read -r pane_id pane_cmd pane_title; do
+    [ "$pane_cmd" = "kak" ] || continue
+
+    candidate="$(printf '%s\n' "$pane_title" | extract_session_from_text || true)"
+    if [ -n "$candidate" ] && is_live_session "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+
+    captured="$(tmux capture-pane -p -t "$pane_id" -S -3 2>/dev/null || true)"
+    candidate="$(printf '%s\n' "$captured" | extract_session_from_text || true)"
+    if [ -n "$candidate" ] && is_live_session "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done <<EOF_PANES
+$panes
+EOF_PANES
+
+  return 1
+}
+
+pick_single_live_session() {
+  local live
+  live="$(list_live_sessions)"
+  [ -n "$live" ] || return 1
+  if [ "$(printf '%s\n' "$live" | wc -l | tr -d ' ')" = "1" ]; then
+    printf '%s\n' "$live"
+    return 0
+  fi
+  return 1
+}
+
+resolve_session() {
+  # Highest priority: explicit override.
+  if [ -n "${KAK_SESSION:-}" ] && [ "${KAK_SESSION}" != "auto" ]; then
+    printf '%s\n' "$KAK_SESSION"
+    return 0
+  fi
+
+  # Primary auto detection: tmux pane containing Kakoune in current window/session.
+  detected="$(resolve_from_tmux || true)"
+  if [ -n "$detected" ]; then
+    printf '%s' "$detected" > "$session_cache_file"
+    printf '%s\n' "$detected"
+    return 0
+  fi
+
+  # Fast path fallback: scoped cached live session.
+  if [ -f "$session_cache_file" ]; then
+    cached="$(cat "$session_cache_file" 2>/dev/null || true)"
+    if [ -n "$cached" ] && is_live_session "$cached"; then
+      printf '%s\n' "$cached"
+      return 0
+    fi
+  fi
+
+  # Last fallback: if exactly one live session exists, use it.
+  detected="$(pick_single_live_session || true)"
+  if [ -n "$detected" ]; then
+    printf '%s' "$detected" > "$session_cache_file"
+    printf '%s\n' "$detected"
+    return 0
+  fi
+
+  return 1
+}
+
+session="$(resolve_session || true)"
+if [ -z "$session" ]; then
+  log_warn "no live Kakoune session resolved"
+  exit 0
+fi
+
+compile_cache_info="$(ensure_compile_commands_cache "$path" || true)"
+lsp_servers_cmd=""
+if [ -n "$compile_cache_info" ]; then
+  project_root="${compile_cache_info%%|*}"
+  compile_commands_dir="${compile_cache_info#*|}"
+  project_root_toml="$(toml_escape "$project_root")"
+  compile_commands_dir_toml="$(toml_escape "$compile_commands_dir")"
+  lsp_servers_cmd="try %{ set-option buffer lsp_servers %{
+    [clangd]
+    args = [\"--log=error\", \"--background-index\", \"--compile-commands-dir=$compile_commands_dir_toml\"]
+    offset_encoding = \"utf-8\"
+    root = \"$project_root_toml\"
+} }
+try %{ lsp-did-change-config }"
+fi
+
+escaped_path=${path//\'/\'\'}
+preview_cmd="edit -existing -- '$escaped_path'
+$lsp_servers_cmd
+try %{ add-highlighter -override window/lsp_semantic_tokens_ranges ranges lsp_semantic_tokens_ranges }"
+cmd="try %{ eval -client $client %{ $preview_cmd } } catch %{ eval -client client0 %{ $preview_cmd } }"
+
+send_stderr_file="$(mktemp "$state_root/kak-preview-sync-${USER}.stderr.XXXXXX" 2>/dev/null || mktemp "/tmp/kak-preview-sync-${USER}.stderr.XXXXXX")"
+send_ok=true
+if ! printf '%s\n' "$cmd" | kak -p "$session" >/dev/null 2>"$send_stderr_file"; then
+  send_ok=false
+  send_stderr="$(tr '\n' ' ' < "$send_stderr_file" | sed 's/[[:space:]]\+/ /g; s/^ *//; s/ *$//')"
+  if [ -n "$send_stderr" ]; then
+    log_warn "kak -p failed: $send_stderr"
+  else
+    log_warn "kak -p failed"
+  fi
+fi
+rm -f "$send_stderr_file"
+
+if [ "$send_ok" = true ]; then
+  semantic_token="$session|$client|$path|$$|${RANDOM:-0}|$(date +%s)"
+  schedule_semantic_refresh "$semantic_token" "$session" "$client"
+fi

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+setup_xdg_runtime_dir() {
+  local dir="${CLI_NOTES_XDG_RUNTIME_DIR:-/tmp/xdg-runtime-${USER}}"
+  mkdir -p "$dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  export XDG_RUNTIME_DIR="$dir"
+}
+
+setup_xdg_runtime_dir
+
+tmux_session="$(tmux display-message -p '#S' 2>/dev/null || printf 'standalone')"
+safe_tmux_session="$(printf '%s' "$tmux_session" | tr -c 'A-Za-z0-9._-' '_')"
+session_name="kak-${safe_tmux_session}"
+
+export KAK_SESSION="$session_name"
+export KAK_SYNC_SCOPE="$safe_tmux_session"
+
+source_path="${BASH_SOURCE[0]}"
+if [ -L "$source_path" ]; then
+  link_target="$(readlink "$source_path")"
+  case "$link_target" in
+    /*) source_path="$link_target" ;;
+    *) source_path="$(dirname "$source_path")/$link_target" ;;
+  esac
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$source_path")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+GLOW_SYNC="$REPO_ROOT/kak/glow-sync.kak"
+
+if [ -f "$GLOW_SYNC" ]; then
+  exec kak -s "$session_name" -e "rename-client main; source '$GLOW_SYNC'"
+fi
+
+exec kak -s "$session_name" -e "rename-client main"

@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+merge_yazi_toml() {
+  local base_toml="$1"
+  local override_toml="$2"
+  local out_toml="$3"
+
+  python3 - "$base_toml" "$override_toml" "$out_toml" <<'PY'
+import datetime
+import json
+import math
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+
+def deep_merge(base, override):
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            if key in merged:
+                merged[key] = deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    return override
+
+
+key_pattern = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def fmt_key(key):
+    if key_pattern.fullmatch(key):
+        return key
+    return json.dumps(key, ensure_ascii=False)
+
+
+def fmt_path(path):
+    return ".".join(fmt_key(part) for part in path)
+
+
+def fmt_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        if math.isinf(value):
+            return "inf" if value > 0 else "-inf"
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, datetime.time):
+        return value.isoformat()
+    if isinstance(value, list):
+        return "[" + ", ".join(fmt_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        parts = [f"{fmt_key(k)} = {fmt_value(v)}" for k, v in value.items()]
+        return "{ " + ", ".join(parts) + " }"
+    raise TypeError(f"Unsupported TOML value type: {type(value).__name__}")
+
+
+def emit(path, value, lines):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            emit(path + [key], child, lines)
+        return
+    lines.append(f"{fmt_path(path)} = {fmt_value(value)}")
+
+
+base_path, override_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def load_or_empty(path: str):
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+
+base_data = load_or_empty(base_path)
+override_data = load_or_empty(override_path)
+
+merged = deep_merge(base_data, override_data)
+lines = []
+for top_key, top_value in merged.items():
+    emit([top_key], top_value, lines)
+
+output = "\n".join(lines)
+if output:
+    output += "\n"
+
+Path(out_path).write_text(output, encoding="utf-8")
+PY
+}
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_falsy() {
+  case "${1:-}" in
+    0|false|no|off) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+setup_xdg_runtime_dir() {
+  local dir="${CLI_NOTES_XDG_RUNTIME_DIR:-/tmp/xdg-runtime-${USER}}"
+  mkdir -p "$dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  export XDG_RUNTIME_DIR="$dir"
+}
+
+detect_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || true
+}
+
+if [ -n "${TMUX_PANE:-}" ]; then
+  tmux_session="$(tmux display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null || printf 'standalone')"
+else
+  tmux_session="$(tmux display-message -p '#S' 2>/dev/null || printf 'standalone')"
+fi
+
+safe_tmux_session="$(printf '%s' "$tmux_session" | tr -c 'A-Za-z0-9._-' '_')"
+kak_session="kak-${safe_tmux_session}"
+
+setup_xdg_runtime_dir
+
+export KAK_SESSION="$kak_session"
+export KAK_SYNC_SCOPE="$safe_tmux_session"
+
+# Use per-tmux-session Yazi config if available.
+# Example: ~/.config/yazi-cli-notes/
+config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+session_config_prefix="${YAZI_SESSION_CONFIG_PREFIX:-yazi-}"
+session_config_home="$config_root/${session_config_prefix}${safe_tmux_session}"
+default_config_home="${YAZI_DEFAULT_CONFIG_HOME:-$config_root/yazi}"
+selected_config_home="${YAZI_CONFIG_HOME:-}"
+
+if [ -z "$selected_config_home" ]; then
+  if [ -d "$session_config_home" ]; then
+    selected_config_home="$session_config_home"
+  else
+    selected_config_home="$default_config_home"
+  fi
+fi
+
+persist_config_home="$selected_config_home"
+
+if [ "$selected_config_home" = "$session_config_home" ] && [ -d "$session_config_home" ]; then
+  # Compose session config on top of the default config so partial
+  # session-specific overrides (e.g. only yazi.toml) don't drop keymaps.
+  merged_config_home="$(mktemp -d "${TMPDIR:-/tmp}/yazi-config-${safe_tmux_session}.XXXXXX")"
+  if [ -d "$default_config_home" ]; then
+    cp -R "$default_config_home/." "$merged_config_home/" 2>/dev/null || true
+  fi
+  cp -R "$session_config_home/." "$merged_config_home/" 2>/dev/null || true
+
+  default_yazi_toml="$default_config_home/yazi.toml"
+  session_yazi_toml="$session_config_home/yazi.toml"
+  merged_yazi_toml="$merged_config_home/yazi.toml"
+  if [ -f "$default_yazi_toml" ] && [ -f "$session_yazi_toml" ]; then
+    merge_yazi_toml "$default_yazi_toml" "$session_yazi_toml" "$merged_yazi_toml" || cp "$session_yazi_toml" "$merged_yazi_toml"
+  fi
+
+  export YAZI_CONFIG_HOME="$merged_config_home"
+else
+  export YAZI_CONFIG_HOME="$selected_config_home"
+fi
+
+# Optional: merge repo-root yazi.toml on top of the selected config.
+# tmux前提運用に寄せて、tmux外では何もしない。
+dir_config_mode="${YAZI_DIR_CONFIG:-auto}"
+enable_dir_config=0
+repo_root="$(detect_repo_root)"
+repo_yazi_toml="${repo_root:+$repo_root/yazi.toml}"
+
+if [ -z "${TMUX_PANE:-}" ]; then
+  enable_dir_config=0
+elif is_truthy "$dir_config_mode"; then
+  enable_dir_config=1
+elif is_falsy "$dir_config_mode"; then
+  enable_dir_config=0
+elif [ "$dir_config_mode" = "auto" ]; then
+  if [ -n "$repo_yazi_toml" ] && [ -f "$repo_yazi_toml" ]; then
+    enable_dir_config=1
+  fi
+else
+  echo "Invalid YAZI_DIR_CONFIG value: $dir_config_mode (expected auto/true/false)" >&2
+fi
+
+if [ "$enable_dir_config" -eq 1 ] && [ -n "$repo_yazi_toml" ] && [ -f "$repo_yazi_toml" ]; then
+  if [ "${YAZI_CONFIG_HOME:-}" = "$selected_config_home" ]; then
+    merged_dir_config_home="$(mktemp -d "${TMPDIR:-/tmp}/yazi-repo-config-${safe_tmux_session}.XXXXXX")"
+    cp -R "$selected_config_home/." "$merged_dir_config_home/" 2>/dev/null || true
+    export YAZI_CONFIG_HOME="$merged_dir_config_home"
+  fi
+
+  current_toml="${YAZI_CONFIG_HOME:?}/yazi.toml"
+  tmp_toml="$(mktemp "${TMPDIR:-/tmp}/yazi-toml-merge.XXXXXX")"
+  : >"$tmp_toml"
+  [ -f "$current_toml" ] && cp "$current_toml" "$tmp_toml" 2>/dev/null || true
+
+  merge_yazi_toml "$tmp_toml" "$repo_yazi_toml" "$tmp_toml.next" || cp "$repo_yazi_toml" "$tmp_toml.next"
+  mv "$tmp_toml.next" "$tmp_toml"
+
+  cp "$tmp_toml" "$current_toml" 2>/dev/null || true
+  rm -f "$tmp_toml" "$tmp_toml.next" 2>/dev/null || true
+fi
+
+# Persist for future panes/windows in the same tmux session.
+if [ "$tmux_session" != "standalone" ]; then
+  tmux set-environment -t "$tmux_session" XDG_RUNTIME_DIR "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  tmux set-environment -t "$tmux_session" CLI_NOTES_XDG_RUNTIME_DIR "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  tmux set-environment -t "$tmux_session" YAZI_CONFIG_HOME "$persist_config_home" 2>/dev/null || true
+fi
+
+if is_truthy "${YAZI_SESSION_DEBUG:-}"; then
+  {
+    echo "tmux_session=$tmux_session"
+    echo "selected_config_home=$selected_config_home"
+    echo "persist_config_home=$persist_config_home"
+    echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<unset>}"
+    echo "YAZI_CONFIG_HOME=${YAZI_CONFIG_HOME:-}"
+    echo "YAZI_DIR_CONFIG=${YAZI_DIR_CONFIG:-auto} (enabled=$enable_dir_config)"
+    if [ "${enable_dir_config:-0}" -eq 1 ]; then
+      echo "repo_root=${repo_root:-}"
+      echo "repo_yazi_toml=${repo_yazi_toml:-}"
+    fi
+  } >&2
+fi
+
+if is_truthy "${YAZI_SESSION_DRY_RUN:-}"; then
+  exit 0
+fi
+
+exec yazi "$@"
