@@ -8,6 +8,7 @@ GNU Stow で管理する個人用 dotfiles です。
 kak/   Kakoune 設定
 yazi/  Kakoune プレビュー連携用の Yazi 設定
 bin/   ~/.local/bin に置く補助スクリプト
+tools/ 補助スクリプトの Rust 実装
 tmux/  tmux 設定
 ghostty/  Ghostty 設定
 ```
@@ -17,6 +18,7 @@ ghostty/  Ghostty 設定
 ```sh
 git clone <repo-url> ~/dotfiles
 cd ~/dotfiles
+cargo build --release --manifest-path tools/dotfiles-cli/Cargo.toml
 stow kak yazi bin tmux ghostty
 ```
 
@@ -30,8 +32,8 @@ stow kak yazi bin tmux ghostty
 - clangd
 - Yazi
 - tmux
-- jq
 - ripgrep
+- Rust / Cargo
 - macOS の `pbcopy` / `pbpaste`
 - tmux の plugin 管理を使う場合は TPM
 
@@ -66,7 +68,7 @@ Yazi の移動キーから次のスクリプトを呼びます。
 ~/.local/bin/kak-preview-sync
 ```
 
-このスクリプトは tmux の現在 window 内にある Kakoune セッションを探し、Yazi で選択中のファイルを Kakoune 側に表示します。C/C++ ファイルでは LSP の semantic highlight も更新します。
+この wrapper は `tools/dotfiles-cli` の Rust バイナリを実行します。tmux の現在 window 内にある Kakoune セッションを探し、Yazi で選択中のファイルを Kakoune 側に表示します。C/C++ ファイルでは LSP の semantic highlight も更新します。
 
 C/C++ 用には、生成した `compile_commands.json` を次の cache 配下に置きます。
 
@@ -102,7 +104,7 @@ export KAK_SYNC_SCOPE=my-scope # state/log の名前空間
 ~/.local/bin/kak-session
 ```
 
-`yazi-session` は `yazi-session-core` を探して実行する薄い wrapper です。`yazi-session-core` は tmux session 名から次を設定します。
+これらの wrapper も `tools/dotfiles-cli` の Rust バイナリを実行します。`yazi-session` は `yazi-session-core` を探して実行する薄い wrapper です。`yazi-session-core` は tmux session 名から次を設定します。
 
 - `KAK_SESSION`
 - `KAK_SYNC_SCOPE`

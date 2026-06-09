@@ -1,26 +1,27 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_CORE="$SCRIPT_DIR/yazi-session-core"
-GLOBAL_CORE_DEFAULT="${XDG_BIN_HOME:-$HOME/.local/bin}/yazi-session-core"
-
-if [ -n "${YAZI_SESSION_CORE:-}" ]; then
-  if [ ! -x "$YAZI_SESSION_CORE" ]; then
-    echo "YAZI_SESSION_CORE is set but not executable: $YAZI_SESSION_CORE" >&2
-    exit 1
-  fi
-  exec "$YAZI_SESSION_CORE" "$@"
+self=$0
+case "$self" in
+  */*) ;;
+  *) self=$(command -v -- "$self" 2>/dev/null || printf '%s' "$self") ;;
+esac
+if [ -L "$self" ]; then
+  target=$(readlink "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
 fi
 
-if [ -x "$LOCAL_CORE" ]; then
-  exec "$LOCAL_CORE" "$@"
+script_dir=$(cd "$(dirname "$self")" && pwd)
+repo_root=$(cd "$script_dir/../../.." && pwd)
+bin="$repo_root/tools/dotfiles-cli/target/release/yazi-session"
+
+if [ ! -x "$bin" ]; then
+  echo "dotfiles-cli is not built. Run:" >&2
+  echo "  cargo build --release --manifest-path \"$repo_root/tools/dotfiles-cli/Cargo.toml\"" >&2
+  exit 1
 fi
 
-if [ -x "$GLOBAL_CORE_DEFAULT" ]; then
-  exec "$GLOBAL_CORE_DEFAULT" "$@"
-fi
-
-echo "Missing yazi-session-core." >&2
-echo "Checked: $GLOBAL_CORE_DEFAULT and $LOCAL_CORE" >&2
-exit 1
+exec "$bin" "$@"
