@@ -1,12 +1,22 @@
 # tmux with no arguments opens a session scoped to the current directory.
+# tmux with one non-command argument opens that named session.
 tmux() {
-  if [[ $# -ne 0 ]]; then
-    command tmux "$@"
+  if [[ $# -eq 0 ]]; then
+    _tmux_open_session "$(basename "$PWD")"
     return
   fi
 
+  if (( $# == 1 )) && [[ "$1" != -* ]] && ! _tmux_is_command "$1"; then
+    _tmux_open_session "$1"
+    return
+  fi
+
+  command tmux "$@"
+}
+
+_tmux_open_session() {
   local session
-  session="$(basename "$PWD")"
+  session="$1"
   session="${session//[^[:alnum:]_.-]/_}"
   [[ -n "$session" ]] || session="root"
 
@@ -17,4 +27,8 @@ tmux() {
   else
     command tmux new-session -A -s "$session" -c "$PWD"
   fi
+}
+
+_tmux_is_command() {
+  command tmux list-commands "$1" >/dev/null 2>&1
 }
