@@ -15,7 +15,14 @@ if [ -L "$self" ]; then
 fi
 
 script_dir=$(cd "$(dirname "$self")" && pwd)
-repo_root=$(cd "$script_dir/../../.." && pwd)
+repo_root=$script_dir
+while [ "$repo_root" != "/" ] && [ ! -f "$repo_root/tools/dotfiles-cli/Cargo.toml" ]; do
+  repo_root=$(dirname "$repo_root")
+done
+if [ ! -f "$repo_root/tools/dotfiles-cli/Cargo.toml" ]; then
+  echo "dotfiles repository root not found from $script_dir" >&2
+  exit 1
+fi
 bin="$repo_root/tools/dotfiles-cli/target/release/yazi-session"
 
 if [ ! -x "$bin" ]; then
