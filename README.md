@@ -24,10 +24,13 @@ make stow
 
 リンク先のファイルが既に存在する場合は、事前に退避するか、このリポジトリへ取り込んでください。
 
-`kak/` はリポジトリ内では `kak/kakrc` として置き、`~/.config/kak/` を Stow の target にしています。個別に反映する場合は次を実行します。
+`bin/`, `ghostty/`, `kak/`, `yazi/` はリポジトリ内の階層を浅くし、`Makefile` 側で Stow の target を指定しています。個別に反映する場合は次を実行します。
 
 ```sh
+make stow-bin
+make stow-ghostty
 make stow-kak
+make stow-yazi
 ```
 
 ## 依存コマンド
