@@ -5,11 +5,11 @@ GNU Stow で管理する個人用 dotfiles です。
 ## パッケージ構成
 
 ```text
-kak/   Kakoune 設定
-yazi/  Kakoune プレビュー連携用の Yazi 設定
-bin/   ~/.local/bin に置く補助スクリプト
-tools/ 補助スクリプトの Rust 実装
-tmux/  tmux 設定
+kak/      Kakoune 設定
+yazi/     Kakoune プレビュー連携用の Yazi 設定
+bin/      ~/.local/bin に置く補助スクリプト
+tools/    補助スクリプトの Rust 実装
+tmux/     tmux 設定
 ghostty/  Ghostty 設定
 ```
 
@@ -19,10 +19,16 @@ ghostty/  Ghostty 設定
 git clone <repo-url> ~/dotfiles
 cd ~/dotfiles
 cargo build --release --manifest-path tools/dotfiles-cli/Cargo.toml
-stow kak yazi bin tmux ghostty
+make stow
 ```
 
 リンク先のファイルが既に存在する場合は、事前に退避するか、このリポジトリへ取り込んでください。
+
+`kak/` はリポジトリ内では `kak/kakrc` として置き、`~/.config/kak/` を Stow の target にしています。個別に反映する場合は次を実行します。
+
+```sh
+make stow-kak
+```
 
 ## 依存コマンド
 
