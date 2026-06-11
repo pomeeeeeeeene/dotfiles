@@ -74,7 +74,7 @@ try %{{ lsp-did-change-config }}"#
         .unwrap_or_default();
 
     let preview_cmd = format!(
-        "edit -existing -- '{}'\n{}\ntry %{{ add-highlighter -override window/lsp_semantic_tokens_ranges ranges lsp_semantic_tokens_ranges }}",
+        "edit -existing -- '{}'\n{}",
         kak_quote_single(&state.path.to_string_lossy()),
         lsp_servers_cmd
     );
@@ -532,7 +532,7 @@ fn run_semantic_refresh(args: &[String]) {
         return;
     }
 
-    let semantic_cmd = "try %{ add-highlighter -override window/lsp_semantic_tokens_ranges ranges lsp_semantic_tokens_ranges }\ntry %{ lsp-did-change }\ntry %{ set-option buffer lsp_semantic_tokens_timestamp -1 }\ntry %{ lsp-semantic-tokens }";
+    let semantic_cmd = "try %{ lsp-semantic-tokens }";
     let cmd = eval_client_command(client, semantic_cmd);
     let _ = send_to_kak(session, &cmd);
 }
