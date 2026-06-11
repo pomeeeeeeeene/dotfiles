@@ -9,8 +9,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 struct State {
     scope: String,
@@ -18,17 +16,11 @@ struct State {
     client: String,
     path_file: PathBuf,
     session_file: PathBuf,
-    semantic_file: PathBuf,
     log_file: PathBuf,
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--semantic-refresh") {
-        run_semantic_refresh(&args);
-        return;
-    }
-
     let background_run = args.get(1).map(String::as_str) == Some("--background-run");
     let path_arg_index = if background_run { 2 } else { 1 };
 
@@ -80,9 +72,8 @@ try %{{ lsp-did-change-config }}"#
     );
     let cmd = eval_client_command(&state.client, &preview_cmd);
 
-    match send_to_kak(&session, &cmd) {
-        Ok(()) => schedule_semantic_refresh(&state, &session),
-        Err(message) => log_warn(&state, Some(&session), &format!("kak -p failed: {message}")),
+    if let Err(message) = send_to_kak(&session, &cmd) {
+        log_warn(&state, Some(&session), &format!("kak -p failed: {message}"));
     }
 }
 
@@ -115,7 +106,6 @@ fn build_state(path: PathBuf) -> State {
         client,
         path_file: state_root.join(format!("kak-preview-sync-{user}-{scope}.last")),
         session_file: state_root.join(format!("kak-preview-sync-{user}-{scope}.session")),
-        semantic_file: state_root.join(format!("kak-preview-sync-{user}-{scope}.semantic")),
         log_file: state_root.join(format!("kak-preview-sync-{user}-{scope}.log")),
     }
 }
@@ -483,56 +473,4 @@ fn send_to_kak(session: &str, cmd: &str) -> Result<(), String> {
     } else {
         Err(stderr)
     }
-}
-
-fn schedule_semantic_refresh(state: &State, session: &str) {
-    let token = format!(
-        "{}|{}|{}|{}",
-        session,
-        state.client,
-        state.path.display(),
-        unique_suffix()
-    );
-    let _ = fs::write(&state.semantic_file, &token);
-
-    let Ok(exe) = env::current_exe() else {
-        return;
-    };
-    let delay = env::var("KAK_PREVIEW_SYNC_DEBOUNCE").unwrap_or_else(|_| "0.18".to_string());
-    let _ = Command::new(exe)
-        .arg("--semantic-refresh")
-        .arg(&state.semantic_file)
-        .arg(&token)
-        .arg(session)
-        .arg(&state.client)
-        .arg(delay)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
-}
-
-fn run_semantic_refresh(args: &[String]) {
-    let (Some(state_file), Some(token), Some(session), Some(client), Some(delay)) = (
-        args.get(2),
-        args.get(3),
-        args.get(4),
-        args.get(5),
-        args.get(6),
-    ) else {
-        return;
-    };
-    let delay = delay.parse::<f64>().unwrap_or(0.18).max(0.0);
-    thread::sleep(Duration::from_secs_f64(delay));
-
-    let Ok(current_token) = fs::read_to_string(state_file) else {
-        return;
-    };
-    if current_token.trim() != token {
-        return;
-    }
-
-    let semantic_cmd = "try %{ lsp-semantic-tokens }";
-    let cmd = eval_client_command(client, semantic_cmd);
-    let _ = send_to_kak(session, &cmd);
 }

@@ -34,22 +34,8 @@ evaluate-commands %sh{
         printf '        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]\n'
         printf '    }\n'
         printf '}\n'
-        printf 'set-option global lsp_semantic_tokens %%{\n'
-        printf '    [\n'
-        printf '        {face="function", token="function"},\n'
-        printf '        {face="function", token="method"},\n'
-        printf '        {face="variable", token="variable"},\n'
-        printf '        {face="variable", token="parameter"},\n'
-        printf '        {face="variable", token="property"},\n'
-        printf '    ]\n'
-        printf '}\n'
         printf 'lsp-enable\n'
-        printf 'remove-hooks global semantic-tokens\n'
-        printf 'define-command -hidden -override refresh-lsp-semantic-tokens %%{\n'
-        printf '    try %%{ lsp-semantic-tokens }\n'
-        printf '}\n'
-        printf 'hook -group semantic-tokens global NormalIdle .* refresh-lsp-semantic-tokens\n'
-        printf 'hook -group semantic-tokens global BufReload .* refresh-lsp-semantic-tokens\n'
+        printf 'try %%{ remove-highlighter global/lsp_semantic_tokens_ranges }\n'
     fi
 }
 

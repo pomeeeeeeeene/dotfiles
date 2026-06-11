@@ -51,7 +51,7 @@ make stow-yazi
 Kakoune 設定では主に次を有効にしています。
 
 - C/C++/Objective-C 向けの `kak-lsp` + `clangd`
-- C/C++ の semantic token highlight
+- C/C++ の diagnostics / jump / hover 補助
 - C の定義ジャンプ、参照検索、hover 補助コマンド
 - macOS クリップボード連携
 - 任意の 42 header 挿入コマンド
@@ -77,7 +77,7 @@ Yazi の移動キーから次のスクリプトを呼びます。
 ~/.local/bin/kak-preview-sync
 ```
 
-この wrapper は `tools/dotfiles-cli` の Rust バイナリを実行します。tmux の現在 window 内にある Kakoune セッションを探し、Yazi で選択中のファイルを Kakoune 側に表示します。C/C++ ファイルでは LSP の semantic highlight も更新します。
+この wrapper は `tools/dotfiles-cli` の Rust バイナリを実行します。tmux の現在 window 内にある Kakoune セッションを探し、Yazi で選択中のファイルを Kakoune 側に表示します。
 
 C/C++ 用には、生成した `compile_commands.json` を次の cache 配下に置きます。
 
@@ -86,12 +86,6 @@ C/C++ 用には、生成した `compile_commands.json` を次の cache 配下に
 ```
 
 プロジェクト直下の `compile_commands.json` は書き換えません。既に存在する場合はそれを元にしつつ、未登録の `.c` ファイルだけ cache 側で補完します。
-
-Yazi で高速に移動したときに古い clangd request が溜まらないよう、semantic token 更新は debounce しています。待ち時間は次で調整できます。
-
-```sh
-export KAK_PREVIEW_SYNC_DEBOUNCE=0.18
-```
 
 必要に応じて次の環境変数で挙動を上書きできます。
 
