@@ -255,6 +255,7 @@ define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
         printf 'evaluate-commands -save-regs a %%{\n'
         printf '    set-register a %s\n' "$(kakquote "$header")"
         printf '    execute-keys gg"aP\n'
+        printf '    execute-keys gg10j79la<ret><ret><esc>\n'
         printf '    set-option buffer ft42_header_inserted true\n'
         printf '}\n'
     }
@@ -262,6 +263,34 @@ define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
 
 define-command add42header -docstring 'insert 42 header in .c or .h buffer' %{
     add-42-header
+}
+
+define-command -hidden update-42-header-timestamp %{
+    evaluate-commands -draft -save-regs a %{
+        select 1.1,1.80
+        evaluate-commands %sh{
+            case "$kak_buffile" in
+                *.c|*.h) ;;
+                *) exit 0 ;;
+            esac
+
+            if ! printf '%s\n' "$kak_selection" | grep -Eq '^/\* \*{74} \*/$'; then
+                exit 0
+            fi
+
+            kakquote() {
+                printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
+            }
+
+            name=${kak_opt_ft42_header_name:-${USER:-unknown}}
+            now=$(date '+%Y/%m/%d %H:%M:%S')
+            updated="$now by $name"
+            line=$(printf '/*   Updated: %-40s###   ########.fr       */' "$updated")
+
+            printf 'set-register a %s\n' "$(kakquote "$line")"
+            printf 'execute-keys gg8jxd"aPa<ret><esc>\n'
+        }
+    }
 }
 
 define-command -hidden add-42-header-if-empty %{
@@ -279,6 +308,7 @@ define-command -hidden add-42-header-if-empty %{
 
 hook global BufNewFile .*\.[ch]$ %{ add-42-header-if-empty }
 hook global BufOpenFile .*\.[ch]$ %{ add-42-header-if-empty }
+hook global BufWritePre .*\.[ch]$ %{ update-42-header-timestamp }
 
 evaluate-commands %sh{
     [ -f "$kak_config/local.kak" ] && printf 'source %%|%s|\n' "$kak_config/local.kak"
