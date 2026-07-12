@@ -41,6 +41,7 @@ evaluate-commands %sh{
 
 declare-option -hidden bool lsp_snippets_suppress_completion false
 declare-option -hidden str lsp_snippets_saved_autocomplete ''
+declare-option -hidden bool lsp_snippets_has_saved_autocomplete false
 set-option global lsp_completion_trigger %{
     evaluate-commands %sh{
         if [ "$kak_opt_lsp_snippets_suppress_completion" = true ]; then
@@ -57,7 +58,7 @@ define-command -override lsp-snippets-select-next-placeholders %{
     evaluate-commands %sh{
         eval set -- "$kak_quoted_opt_lsp_snippets_placeholder_groups"
         if [ $# -eq 0 ]; then
-            printf 'set-option window lsp_snippets_suppress_completion false\n'
+            printf 'lsp-snippets-clear-restore-state\n'
             printf "fail 'There are no next placeholders'"
             exit
         fi
@@ -123,6 +124,7 @@ define-command -override lsp-snippets-select-next-placeholders %{
     }
     set-option window lsp_snippets_suppress_completion true
     set-option window lsp_snippets_saved_autocomplete %opt{autocomplete}
+    set-option window lsp_snippets_has_saved_autocomplete true
     set-option window autocomplete ''
     set-option window lsp_snippets_last_text %val{selections}
     execute-keys '<a-;>d'
@@ -131,6 +133,26 @@ define-command -override lsp-snippets-select-next-placeholders %{
 
 declare-option -hidden str lsp_snippets_restore_commands ''
 declare-option -hidden str lsp_snippets_last_text ''
+
+define-command -hidden lsp-snippets-capture-current-placeholder %{
+    update-option window lsp_snippets_placeholders
+    evaluate-commands %sh{
+        [ -n "$kak_quoted_opt_lsp_snippets_placeholder_groups" ] || exit 0
+        kakquote() {
+            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
+        }
+        printf 'set-option window lsp_snippets_suppress_completion true\n'
+        if [ "$kak_opt_lsp_snippets_has_saved_autocomplete" != true ]; then
+            printf 'set-option window lsp_snippets_saved_autocomplete %s\n' \
+                "$(kakquote "$kak_opt_autocomplete")"
+            printf 'set-option window lsp_snippets_has_saved_autocomplete true\n'
+        fi
+        printf "set-option window autocomplete ''\n"
+        printf 'set-option window lsp_snippets_last_text %s\n' \
+            "$(kakquote "$kak_selections")"
+    }
+    lsp-snippets-record-restore
+}
 
 define-command -hidden lsp-snippets-record-restore %{
     evaluate-commands %sh{
@@ -187,8 +209,11 @@ define-command -hidden lsp-snippets-clear-restore-state %{
     set-option window lsp_snippets_restore_commands ''
     set-option window lsp_snippets_last_text ''
     set-option window lsp_snippets_suppress_completion false
-    set-option window autocomplete %opt{lsp_snippets_saved_autocomplete}
+    if %opt{lsp_snippets_has_saved_autocomplete} {
+        set-option window autocomplete %opt{lsp_snippets_saved_autocomplete}
+    }
     set-option window lsp_snippets_saved_autocomplete ''
+    set-option window lsp_snippets_has_saved_autocomplete false
 }
 
 define-command -hidden lsp-snippets-restore-empty-placeholders %{
@@ -336,18 +361,15 @@ hook global InsertCompletionShow .* %{
     try %{ unmap window insert <tab> }
     try %{ unmap window insert <s-tab> }
     try %{ unmap window insert <ret> }
-    try %{ unmap window insert <kpret> }
     map window insert <tab> <c-n>
     map window insert <s-tab> <c-p>
-    map window insert <ret> '<c-y><c-o>'
-    map window insert <kpret> '<c-y><c-o>'
+    map window insert <ret> '<c-y><c-o><a-;>:try lsp-snippets-capture-current-placeholder catch %{}<ret>'
 }
 
 hook global InsertCompletionHide .* %{
     try %{ unmap window insert <tab> }
     try %{ unmap window insert <s-tab> }
     try %{ unmap window insert <ret> }
-    try %{ unmap window insert <kpret> }
 }
 
 map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'
