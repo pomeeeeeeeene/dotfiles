@@ -39,6 +39,162 @@ evaluate-commands %sh{
     fi
 }
 
+declare-option -hidden bool lsp_snippets_suppress_completion false
+declare-option -hidden str lsp_snippets_saved_autocomplete ''
+set-option global lsp_completion_trigger %{
+    evaluate-commands %sh{
+        if [ "$kak_opt_lsp_snippets_suppress_completion" = true ]; then
+            printf "fail 'LSP completion suppressed in snippet placeholders'\n"
+        else
+            printf "execute-keys '<a-h><a-k>\\S.\\z<ret>'\n"
+        fi
+    }
+}
+
+define-command -override lsp-snippets-select-next-placeholders %{
+    execute-keys -with-hooks i<backspace>
+    update-option window lsp_snippets_placeholders
+    evaluate-commands %sh{
+        eval set -- "$kak_quoted_opt_lsp_snippets_placeholder_groups"
+        if [ $# -eq 0 ]; then
+            printf 'set-option window lsp_snippets_suppress_completion false\n'
+            printf "fail 'There are no next placeholders'"
+            exit
+        fi
+        next_id=9999
+        second_next_id=9999
+        for placeholder_id do
+            if [ "$placeholder_id" -lt "$next_id" ]; then
+                second_next_id="$next_id"
+                next_id="$placeholder_id"
+            elif [ "$placeholder_id" -lt "$second_next_id" ] && [ "$placeholder_id" -ne "$next_id" ]; then
+                second_next_id="$placeholder_id"
+            fi
+        done
+        next_descs_id=''
+        second_next_descs_id=''
+        desc_id=0
+        printf 'set-option window lsp_snippets_placeholder_groups'
+        for placeholder_id do
+            if [ "$placeholder_id" -eq "$next_id" ]; then
+                next_descs_id="${next_descs_id} $desc_id"
+            else
+                printf ' %s' "$placeholder_id"
+            fi
+            if [ "$placeholder_id" -eq "$second_next_id" ]; then
+                second_next_descs_id="${second_next_descs_id} $desc_id"
+            fi
+            desc_id=$((desc_id+1))
+        done
+        printf '\n'
+
+        eval set -- "$kak_quoted_opt_lsp_snippets_placeholders"
+        printf 'set-option window lsp_snippets_placeholders'
+        printf ' %s' "$1"
+        shift
+        selections=''
+        desc_id=0
+        for desc do
+            found=0
+            for candidate_desc_id in $next_descs_id; do
+                if [ "$candidate_desc_id" -eq "$desc_id" ]; then
+                    found=1
+                    selections="${selections} ${desc%%\|*}"
+                    break
+                fi
+            done
+            if [ $found -eq 0 ]; then
+                for candidate_desc_id in $second_next_descs_id; do
+                    if [ "$candidate_desc_id" -eq "$desc_id" ]; then
+                        found=1
+                        printf ' %s' "${desc%%\|*}|SnippetsNextPlaceholders"
+                        break
+                    fi
+                done
+                if [ $found -eq 0 ]; then
+                    printf ' %s' "$desc"
+                fi
+            fi
+            desc_id=$((desc_id+1))
+        done
+        printf '\n'
+
+        printf "select %s\n" "$selections"
+    }
+    set-option window lsp_snippets_suppress_completion true
+    set-option window lsp_snippets_saved_autocomplete %opt{autocomplete}
+    set-option window autocomplete ''
+    set-option window lsp_snippets_last_text %val{selections}
+    execute-keys '<a-;>d'
+    lsp-snippets-record-restore
+}
+
+declare-option -hidden str lsp_snippets_restore_commands ''
+declare-option -hidden str lsp_snippets_last_text ''
+
+define-command -hidden lsp-snippets-record-restore %{
+    evaluate-commands %sh{
+        text=$kak_opt_lsp_snippets_last_text
+        kakquote() {
+            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
+        }
+        shquote() {
+            printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
+        }
+        new_cmd=$(
+            printf 'select %s\n' "$(kakquote "$kak_selections_desc")"
+            printf 'evaluate-commands %%sh{\n'
+            printf 'marker=%s\n' "$(shquote "$kak_selections")"
+            printf '[ "$kak_selections" = "$marker" ] || exit 0\n'
+            printf 'printf "set-register z %s\\n"\n' "$(kakquote "$text")"
+            printf "printf 'execute-keys -with-hooks <esc>\\\"zP\\\\n'\n"
+            printf '}\n'
+        )
+        if [ -n "$kak_opt_lsp_snippets_restore_commands" ]; then
+            new_cmd=$(printf '%s\n%s' "$new_cmd" "$kak_opt_lsp_snippets_restore_commands")
+        fi
+        printf 'set-option window lsp_snippets_restore_commands %s\n' \
+            "$(kakquote "$new_cmd")"
+    }
+}
+
+define-command -hidden lsp-snippets-seed-current-restore %{
+    evaluate-commands %sh{
+        [ -n "$kak_opt_lsp_snippets_restore_commands" ] && exit 0
+        [ -n "$kak_opt_lsp_snippets_last_text" ] || exit 0
+        text=$kak_opt_lsp_snippets_last_text
+        kakquote() {
+            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
+        }
+        shquote() {
+            printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
+        }
+        new_cmd=$(
+            printf 'select %s\n' "$(kakquote "$kak_selections_desc")"
+            printf 'evaluate-commands %%sh{\n'
+            printf 'marker=%s\n' "$(shquote "$kak_selections")"
+            printf '[ "$kak_selections" = "$marker" ] || exit 0\n'
+            printf 'printf "set-register z %s\\n"\n' "$(kakquote "$text")"
+            printf "printf 'execute-keys -with-hooks <esc>\\\"zP\\\\n'\n"
+            printf '}\n'
+        )
+        printf 'set-option window lsp_snippets_restore_commands %s\n' \
+            "$(kakquote "$new_cmd")"
+    }
+}
+
+define-command -hidden lsp-snippets-clear-restore-state %{
+    set-option window lsp_snippets_restore_commands ''
+    set-option window lsp_snippets_last_text ''
+    set-option window lsp_snippets_suppress_completion false
+    set-option window autocomplete %opt{lsp_snippets_saved_autocomplete}
+    set-option window lsp_snippets_saved_autocomplete ''
+}
+
+define-command -hidden lsp-snippets-restore-empty-placeholders %{
+    evaluate-commands %opt{lsp_snippets_restore_commands}
+}
+
 declare-option -hidden str c_symbol_at_cursor %{
     BEGIN {
         if (col < 1) col = 1
@@ -177,17 +333,21 @@ define-command c-hover -docstring 'show C declaration or definition summary, fal
 }
 
 hook global InsertCompletionShow .* %{
+    try %{ unmap window insert <tab> }
+    try %{ unmap window insert <s-tab> }
+    try %{ unmap window insert <ret> }
+    try %{ unmap window insert <kpret> }
     map window insert <tab> <c-n>
     map window insert <s-tab> <c-p>
-    map window insert <ret> <c-y>
-    map window insert <kpret> <c-y>
+    map window insert <ret> '<c-y><c-o>'
+    map window insert <kpret> '<c-y><c-o>'
 }
 
 hook global InsertCompletionHide .* %{
-    unmap window insert <tab>
-    unmap window insert <s-tab>
-    unmap window insert <ret>
-    unmap window insert <kpret>
+    try %{ unmap window insert <tab> }
+    try %{ unmap window insert <s-tab> }
+    try %{ unmap window insert <ret> }
+    try %{ unmap window insert <kpret> }
 }
 
 map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'
@@ -196,6 +356,8 @@ map global normal <c-y> '<esc>:buffer *grep*<ret>' -docstring 'return to referen
 map global normal K '<esc>:c-hover<ret>' -docstring 'show hover'
 map global normal Y ':clipboard-yank<ret>'
 map global normal P ':clipboard-paste<ret>'
+map global insert <esc> '<a-;>:try lsp-snippets-seed-current-restore catch %{}<ret><a-;>:try lsp-snippets-restore-empty-placeholders catch %{}<ret><a-;>:try lsp-snippets-clear-restore-state catch %{}<ret><c-c>'
+map global insert <tab> '<a-;>:try lsp-snippets-select-next-placeholders catch %{ execute-keys -with-hooks <lt>tab> }<ret>' -docstring 'select next snippet placeholder'
 map global normal <c-n> '<a-n>' -docstring 'select previous search match'
 map global normal <c-/> '<a-/>' -docstring 'select previous search match before each selection'
 map global user i '<a-i>' -docstring 'select surrounding inner object'
