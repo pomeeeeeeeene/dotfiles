@@ -67,6 +67,7 @@ Kakoune 設定では主に次を有効にしています。
 ```kak
 declare-option str ft42_header_name yourname
 declare-option str ft42_header_email yourname@example.com
+set-option global auto_42_header true
 ```
 
 ## Yazi + Kakoune プレビュー

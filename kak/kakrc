@@ -481,8 +481,11 @@ define-command -hidden update-42-header-timestamp %{
     }
 }
 
+declare-option -hidden bool auto_42_header false
+
 define-command -hidden add-42-header-if-empty %{
     evaluate-commands %sh{
+        [ "$kak_opt_auto_42_header" = true ] || exit 0
         case "$kak_buffile" in
             *.c|*.h) ;;
             *) exit 0 ;;
