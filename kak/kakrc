@@ -40,8 +40,6 @@ evaluate-commands %sh{
 }
 
 declare-option -hidden bool lsp_snippets_suppress_completion false
-declare-option -hidden str lsp_snippets_saved_autocomplete ''
-declare-option -hidden bool lsp_snippets_has_saved_autocomplete false
 set-option global lsp_completion_trigger %{
     evaluate-commands %sh{
         if [ "$kak_opt_lsp_snippets_suppress_completion" = true ]; then
@@ -123,9 +121,6 @@ define-command -override lsp-snippets-select-next-placeholders %{
         printf "select %s\n" "$selections"
     }
     set-option window lsp_snippets_suppress_completion true
-    set-option window lsp_snippets_saved_autocomplete %opt{autocomplete}
-    set-option window lsp_snippets_has_saved_autocomplete true
-    set-option window autocomplete ''
     set-option window lsp_snippets_last_text %val{selections}
     execute-keys '<a-;>d'
     lsp-snippets-record-restore
@@ -141,13 +136,6 @@ define-command -hidden lsp-snippets-capture-current-placeholder %{
         kakquote() {
             printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
         }
-        printf 'set-option window lsp_snippets_suppress_completion true\n'
-        if [ "$kak_opt_lsp_snippets_has_saved_autocomplete" != true ]; then
-            printf 'set-option window lsp_snippets_saved_autocomplete %s\n' \
-                "$(kakquote "$kak_opt_autocomplete")"
-            printf 'set-option window lsp_snippets_has_saved_autocomplete true\n'
-        fi
-        printf "set-option window autocomplete ''\n"
         printf 'set-option window lsp_snippets_last_text %s\n' \
             "$(kakquote "$kak_selections")"
     }
@@ -209,11 +197,6 @@ define-command -hidden lsp-snippets-clear-restore-state %{
     set-option window lsp_snippets_restore_commands ''
     set-option window lsp_snippets_last_text ''
     set-option window lsp_snippets_suppress_completion false
-    if %opt{lsp_snippets_has_saved_autocomplete} {
-        set-option window autocomplete %opt{lsp_snippets_saved_autocomplete}
-    }
-    set-option window lsp_snippets_saved_autocomplete ''
-    set-option window lsp_snippets_has_saved_autocomplete false
 }
 
 define-command -hidden lsp-snippets-restore-empty-placeholders %{
@@ -378,6 +361,7 @@ map global normal <c-y> '<esc>:buffer *grep*<ret>' -docstring 'return to referen
 map global normal K '<esc>:c-hover<ret>' -docstring 'show hover'
 map global normal Y ':clipboard-yank<ret>'
 map global normal P ':clipboard-paste<ret>'
+map global insert <ret> '<a-;>:try lsp-snippets-clear-restore-state catch %{}<ret><ret>'
 map global insert <esc> '<a-;>:try lsp-snippets-seed-current-restore catch %{}<ret><a-;>:try lsp-snippets-restore-empty-placeholders catch %{}<ret><a-;>:try lsp-snippets-clear-restore-state catch %{}<ret><c-c>'
 map global insert <tab> '<a-;>:try lsp-snippets-select-next-placeholders catch %{ execute-keys -with-hooks <lt>tab> }<ret>' -docstring 'select next snippet placeholder'
 map global normal <c-n> '<a-n>' -docstring 'select previous search match'
