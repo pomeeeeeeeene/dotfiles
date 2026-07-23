@@ -205,6 +205,8 @@ hook global WinSetOption filetype=grep %{
 
 declare-option str ft42_header_name %sh{ printf '%s' "${USER:-unknown}" }
 declare-option str ft42_header_email %sh{ printf '%s@student.42.fr' "${USER:-unknown}" }
+declare-option bool ft42_header_auto_insert false
+declare-option str ft42_header_auto_dirs ''
 declare-option -hidden bool ft42_header_inserted false
 
 define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
@@ -300,12 +302,62 @@ define-command -hidden add-42-header-if-empty %{
             *) exit 0 ;;
         esac
 
+        if [ "$kak_opt_ft42_header_auto_insert" != true ]; then
+            exit 0
+        fi
+
+        in_auto_dir() {
+            [ -n "$kak_buffile" ] || return 1
+            [ -n "$kak_opt_ft42_header_auto_dirs" ] || return 0
+
+            file_dir=${kak_buffile%/*}
+            if command -v realpath >/dev/null 2>&1; then
+                file_dir=$(realpath "$file_dir" 2>/dev/null || printf '%s\n' "$file_dir")
+            fi
+
+            old_ifs=$IFS
+            IFS=:
+            for dir in $kak_opt_ft42_header_auto_dirs; do
+                IFS=$old_ifs
+                [ -n "$dir" ] || continue
+                dir=${dir%/}
+                if command -v realpath >/dev/null 2>&1; then
+                    dir=$(realpath "$dir" 2>/dev/null || printf '%s\n' "$dir")
+                fi
+                case "$file_dir/" in
+                    "$dir"/*) return 0 ;;
+                esac
+                IFS=:
+            done
+            IFS=$old_ifs
+            return 1
+        }
+
+        in_auto_dir || exit 0
+
         if [ ! -e "$kak_buffile" ] || [ ! -s "$kak_buffile" ]; then
             printf 'add-42-header\n'
         fi
     }
 }
 
+define-command -hidden source-42-header-local-kak %{
+    evaluate-commands %sh{
+        [ -n "$kak_buffile" ] || exit 0
+
+        printf 'set-option buffer ft42_header_auto_insert false\n'
+        printf 'set-option buffer ft42_header_auto_dirs %%{}\n'
+
+        dir=${kak_buffile%/*}
+        local_kak=$dir/local.kak
+        [ -f "$local_kak" ] || exit 0
+
+        printf 'source %%|%s|\n' "$local_kak"
+    }
+}
+
+hook global BufNewFile .*\.[ch]$ %{ source-42-header-local-kak }
+hook global BufOpenFile .*\.[ch]$ %{ source-42-header-local-kak }
 hook global BufNewFile .*\.[ch]$ %{ add-42-header-if-empty }
 hook global BufOpenFile .*\.[ch]$ %{ add-42-header-if-empty }
 hook global BufWritePre .*\.[ch]$ %{ update-42-header-timestamp }
