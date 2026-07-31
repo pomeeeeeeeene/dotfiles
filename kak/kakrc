@@ -25,7 +25,6 @@ define-command -override clipboard-paste %{
 
 evaluate-commands %sh{
     if command -v kak-lsp >/dev/null 2>&1; then
-        printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
         printf 'hook global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
         printf '    set-option buffer lsp_servers %%{\n'
         printf '        [clangd]\n'
@@ -50,6 +49,7 @@ evaluate-commands %sh{
         printf '        fixAll = true\n'
         printf '    }\n'
         printf '}\n'
+        printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
         printf 'lsp-enable\n'
         printf 'try %%{ remove-highlighter global/lsp_semantic_tokens_ranges }\n'
     fi
