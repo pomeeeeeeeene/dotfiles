@@ -1,5 +1,7 @@
 # tmux with no arguments opens a session scoped to the current directory.
 # tmux with one non-command argument opens that named session.
+alias bat='bat -pp'
+
 tmux() {
   if [[ $# -eq 0 ]]; then
     _tmux_open_session "$(basename "$PWD")"
