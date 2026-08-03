@@ -34,3 +34,13 @@ _tmux_open_session() {
 _tmux_is_command() {
   command tmux list-commands "$1" >/dev/null 2>&1
 }
+
+# Inside tmux, join the session-scoped Kakoune server and register this pane.
+# Outside tmux, keep the normal Kakoune command unchanged.
+kak() {
+  if [[ -n "$TMUX" ]]; then
+    command kak-session "$@"
+  else
+    command kak "$@"
+  fi
+}

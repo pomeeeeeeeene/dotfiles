@@ -18,12 +18,9 @@ bottom_pane=$(
 pane_path=$(
   tmux -S "$socket_path" display-message -p -t "$bottom_pane" '#{pane_current_path}'
 )
-
 left_top_pane=$(
-  tmux -S "$socket_path" split-window -v -b -l 70% -c "$pane_path" -t "$bottom_pane" -P -F '#{pane_id}' yazi
+  tmux -S "$socket_path" split-window -v -b -l 70% -c "$pane_path" -t "$bottom_pane" -P -F '#{pane_id}'
 )
-right_top_pane=$(
-  tmux -S "$socket_path" split-window -h -l 80% -c "$pane_path" -t "$left_top_pane" -P -F '#{pane_id}' kak
-)
+tmux -S "$socket_path" split-window -h -p 50 -c "$pane_path" -t "$left_top_pane"
 
 tmux -S "$socket_path" select-pane -t "$bottom_pane"
