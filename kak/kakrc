@@ -23,6 +23,34 @@ define-command -override clipboard-paste %{
     }
 }
 
+define-command file-path \
+    -docstring 'show the current file path or buffer name' %{
+    echo %sh{
+        if [ -n "$kak_buffile" ]; then
+            printf '%s' "$kak_buffile"
+        else
+            printf '%s (not associated with a file)' "$kak_bufname"
+        fi
+    }
+}
+
+define-command file-path-copy \
+    -docstring 'copy the current file path to the clipboard' %{
+    evaluate-commands %sh{
+        if [ -z "$kak_buffile" ]; then
+            printf "fail 'Current buffer is not associated with a file'\n"
+            exit
+        fi
+
+        printf '%s' "$kak_buffile" | pbcopy
+        escaped_path=$(printf '%s' "$kak_buffile" | sed "s/'/''/g")
+        printf "echo 'Copied: %s'\n" "$escaped_path"
+    }
+}
+
+alias global fp file-path
+alias global fpc file-path-copy
+
 evaluate-commands %sh{
     if command -v kak-lsp >/dev/null 2>&1; then
         printf 'hook global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
@@ -211,6 +239,8 @@ map global normal P ':clipboard-paste<ret>'
 map global normal <c-n> '<a-n>' -docstring 'select previous search match'
 map global normal <c-/> '<a-/>' -docstring 'select previous search match before each selection'
 map global user i '<a-i>' -docstring 'select surrounding inner object'
+map global user p '<esc>:file-path<ret>' -docstring 'show current file path'
+map global user o '<esc>:file-path-copy<ret>' -docstring 'copy current file path'
 
 hook global WinSetOption filetype=grep %{
     map window normal <c-y> '<c-o>' -docstring 'return to source'
