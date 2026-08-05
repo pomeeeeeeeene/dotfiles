@@ -20,13 +20,29 @@ hook -group dotfiles-php-indent global WinSetOption filetype=php %{
 
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
-        printf "%s" "$kak_selections" | pbcopy
+        if command -v pbcopy >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | xclip -selection clipboard
+        else
+            printf "fail 'clipboard command not found: install wl-clipboard or xclip'\n"
+        fi
     }
 }
 
 define-command -override clipboard-paste %{
     execute-keys -draft %sh{
-        printf 'i%s' "$(pbpaste | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        if command -v pbpaste >/dev/null 2>&1; then
+            pbpaste
+        elif command -v wl-paste >/dev/null 2>&1; then
+            wl-paste --no-newline
+        elif command -v xclip >/dev/null 2>&1; then
+            xclip -selection clipboard -o
+        else
+            exit 1
+        fi | sed 's/\\/\\\\/g; s/"/\\"/g; 1s/^/i/'
     }
 }
 
@@ -49,7 +65,17 @@ define-command file-path-copy \
             exit
         fi
 
-        printf '%s' "$kak_buffile" | pbcopy
+        if command -v pbcopy >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | xclip -selection clipboard
+        else
+            printf "fail 'clipboard command not found: install wl-clipboard or xclip'\n"
+            exit
+        fi
+
         escaped_path=$(printf '%s' "$kak_buffile" | sed "s/'/''/g")
         printf "echo 'Copied: %s'\n" "$escaped_path"
     }
