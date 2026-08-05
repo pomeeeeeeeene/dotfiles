@@ -11,6 +11,13 @@ hook global WinSetOption filetype=c %{
     set-option buffer tabstop 2
 }
 
+try %{ remove-hooks global dotfiles-php-indent }
+hook -group dotfiles-php-indent global WinSetOption filetype=php %{
+    set-option buffer indentwidth 4
+    set-option buffer tabstop 4
+    map window insert <tab> '<space><space><space><space>'
+}
+
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
         printf "%s" "$kak_selections" | pbcopy
@@ -195,7 +202,19 @@ define-command -hidden fzf-check %{
 define-command fzf-file -docstring 'find and edit a file with fzf' %{
     fzf-check
     evaluate-commands %sh{
-        root=$(git -C "${kak_buffile%/*}" rev-parse --show-toplevel 2>/dev/null || pwd)
+        root=$(tmux display-message -p -t "$kak_client_env_TMUX_PANE" \
+            '#{session_path}' 2>/dev/null || true)
+        if [ -z "$root" ] || [ ! -d "$root" ]; then
+            buffer_dir=${kak_buffile%/*}
+            if [ -z "$kak_buffile" ]; then
+                buffer_dir=$(pwd -P)
+            elif [ "$buffer_dir" = "$kak_buffile" ]; then
+                buffer_dir=.
+            fi
+            buffer_dir=$(cd "$buffer_dir" 2>/dev/null && pwd -P) || buffer_dir=$(pwd -P)
+            root=$(git -C "$buffer_dir" rev-parse --show-toplevel 2>/dev/null || true)
+            [ -n "$root" ] || root=$buffer_dir
+        fi
         choice=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-file.XXXXXX") || exit 0
         trap 'rm -f "$choice"' EXIT HUP INT TERM
 
@@ -212,7 +231,19 @@ define-command fzf-file -docstring 'find and edit a file with fzf' %{
 define-command fzf-grep -docstring 'live-search project text with rg and fzf' %{
     fzf-check
     evaluate-commands %sh{
-        root=$(git -C "${kak_buffile%/*}" rev-parse --show-toplevel 2>/dev/null || pwd)
+        root=$(tmux display-message -p -t "$kak_client_env_TMUX_PANE" \
+            '#{session_path}' 2>/dev/null || true)
+        if [ -z "$root" ] || [ ! -d "$root" ]; then
+            buffer_dir=${kak_buffile%/*}
+            if [ -z "$kak_buffile" ]; then
+                buffer_dir=$(pwd -P)
+            elif [ "$buffer_dir" = "$kak_buffile" ]; then
+                buffer_dir=.
+            fi
+            buffer_dir=$(cd "$buffer_dir" 2>/dev/null && pwd -P) || buffer_dir=$(pwd -P)
+            root=$(git -C "$buffer_dir" rev-parse --show-toplevel 2>/dev/null || true)
+            [ -n "$root" ] || root=$buffer_dir
+        fi
         choice=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-grep.XXXXXX") || exit 0
         trap 'rm -f "$choice"' EXIT HUP INT TERM
 
@@ -255,7 +286,13 @@ define-command fzf-buffer -docstring 'switch buffers with fzf' %{
 
 evaluate-commands %sh{
     if command -v kak-lsp >/dev/null 2>&1; then
-        printf 'hook global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
+        lsp_needs_init=false
+        if [ "${kak_opt_lsp_pid_file+x}" != x ]; then
+            lsp_needs_init=true
+            printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
+        fi
+        printf 'try %%{ remove-hooks global dotfiles-lsp-config }\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
         printf '    set-option buffer lsp_servers %%{\n'
         printf '        [clangd]\n'
         printf '        args = ["--log=error", "--background-index"]\n'
@@ -263,7 +300,15 @@ evaluate-commands %sh{
         printf '        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]\n'
         printf '    }\n'
         printf '}\n'
-        printf 'hook global User LSPDefaultConfig=python %%{\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=php %%{\n'
+        printf '    set-option buffer lsp_servers %%{\n'
+        printf '        [intelephense]\n'
+        printf '        command = "intelephense"\n'
+        printf '        args = ["--stdio"]\n'
+        printf '        root_globs = ["composer.json", ".htaccess", ".git", ".hg"]\n'
+        printf '    }\n'
+        printf '}\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=python %%{\n'
         printf '    set-option buffer lsp_servers %%{\n'
         printf '        [basedpyright]\n'
         printf '        command = "basedpyright-langserver"\n'
@@ -279,8 +324,9 @@ evaluate-commands %sh{
         printf '        fixAll = true\n'
         printf '    }\n'
         printf '}\n'
-        printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
-        printf 'lsp-enable\n'
+        if [ "$lsp_needs_init" = true ]; then
+            printf 'lsp-enable\n'
+        fi
         printf 'try %%{ remove-highlighter global/lsp_semantic_tokens_ranges }\n'
     fi
 }
@@ -422,14 +468,20 @@ define-command c-hover -docstring 'show C declaration or definition summary, fal
     }
 }
 
-hook global InsertCompletionShow .* %{
+try %{ remove-hooks global dotfiles-insert-completion-tab }
+hook -group dotfiles-insert-completion-tab global InsertCompletionShow .* %{
     map window insert <tab> <c-n>
     map window insert <s-tab> <c-p>
 }
 
-hook global InsertCompletionHide .* %{
+hook -group dotfiles-insert-completion-tab global InsertCompletionHide .* %{
     unmap window insert <tab>
     unmap window insert <s-tab>
+    evaluate-commands %sh{
+        if [ "$kak_opt_filetype" = php ]; then
+            printf "map window insert <tab> '<space><space><space><space>'\n"
+        fi
+    }
 }
 
 map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'

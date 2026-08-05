@@ -44,3 +44,15 @@ kak() {
     command kak "$@"
   fi
 }
+
+# Create the parent directory for a new file before opening it in Kakoune.
+kakm() {
+  if (( $# != 1 )); then
+    print -u2 'usage: kakm <file>'
+    return 2
+  fi
+
+  local parent=${1:h}
+  [[ -d "$parent" ]] || mkdir -p -- "$parent" || return
+  kak "$1"
+}
