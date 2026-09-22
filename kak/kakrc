@@ -11,22 +11,315 @@ hook global WinSetOption filetype=c %{
     set-option buffer tabstop 2
 }
 
+try %{ remove-hooks global dotfiles-php-indent }
+hook -group dotfiles-php-indent global WinSetOption filetype=php %{
+    set-option buffer indentwidth 4
+    set-option buffer tabstop 4
+    map window insert <tab> '<space><space><space><space>'
+}
+
 define-command -override clipboard-yank %{
     evaluate-commands %sh{
-        printf "%s" "$kak_selections" | pbcopy
+        if command -v pbcopy >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then
+            printf "%s" "$kak_selections" | xclip -selection clipboard
+        else
+            printf "fail 'clipboard command not found: install wl-clipboard or xclip'\n"
+        fi
     }
 }
 
 define-command -override clipboard-paste %{
     execute-keys -draft %sh{
-        printf 'i%s' "$(pbpaste | sed 's/\\/\\\\/g; s/"/\\"/g')"
+        if command -v pbpaste >/dev/null 2>&1; then
+            pbpaste
+        elif command -v wl-paste >/dev/null 2>&1; then
+            wl-paste --no-newline
+        elif command -v xclip >/dev/null 2>&1; then
+            xclip -selection clipboard -o
+        else
+            exit 1
+        fi | sed 's/\\/\\\\/g; s/"/\\"/g; 1s/^/i/'
+    }
+}
+
+define-command file-path \
+    -docstring 'show the current file path or buffer name' %{
+    echo %sh{
+        if [ -n "$kak_buffile" ]; then
+            printf '%s' "$kak_buffile"
+        else
+            printf '%s (not associated with a file)' "$kak_bufname"
+        fi
+    }
+}
+
+define-command file-path-copy \
+    -docstring 'copy the current file path to the clipboard' %{
+    evaluate-commands %sh{
+        if [ -z "$kak_buffile" ]; then
+            printf "fail 'Current buffer is not associated with a file'\n"
+            exit
+        fi
+
+        if command -v pbcopy >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then
+            printf '%s' "$kak_buffile" | xclip -selection clipboard
+        else
+            printf "fail 'clipboard command not found: install wl-clipboard or xclip'\n"
+            exit
+        fi
+
+        escaped_path=$(printf '%s' "$kak_buffile" | sed "s/'/''/g")
+        printf "echo 'Copied: %s'\n" "$escaped_path"
+    }
+}
+
+alias global fp file-path
+alias global fpc file-path-copy
+
+define-command -hidden kak-send-to-impl -params 1..2 -client-completion %{
+    evaluate-commands %sh{
+        target=$1
+        focus=${2:-false}
+
+        case " $kak_client_list " in
+            *" $target "*) ;;
+            *) printf "fail 'Unknown Kakoune client: %s'\n" "$target"; exit 0 ;;
+        esac
+
+        if [ "$target" = "$kak_client" ]; then
+            printf "fail 'Cannot send buffer to the current client'\n"
+            exit 0
+        fi
+
+        kakquote() {
+            printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+        }
+
+        printf 'evaluate-commands -client %s -verbatim -- buffer %s\n' \
+            "$(kakquote "$target")" "$(kakquote "$kak_bufname")"
+
+        if [ "$focus" = true ]; then
+            pane=$(
+                tmux list-panes -s -t "$kak_client_env_TMUX_PANE" \
+                    -F '#{pane_id} #{@kak_client}' 2>/dev/null |
+                    awk -v target="$target" '$2 == target { print $1; exit }'
+            )
+            if [ -n "$pane" ]; then
+                tmux select-pane -t "$pane"
+            else
+                printf "echo -markup '{Warning}Client %s is not attached to a tmux pane'\n" "$target"
+            fi
+        fi
+    }
+}
+
+define-command kak-send-to -params 1 -client-completion \
+    -docstring 'show the current buffer in a specified Kakoune client' %{
+    kak-send-to-impl %arg{1}
+}
+
+define-command kak-send-to-focus -params 1 -client-completion \
+    -docstring 'show the current buffer in a specified Kakoune client and focus its tmux pane' %{
+    kak-send-to-impl %arg{1} true
+}
+
+define-command -hidden kak-send-next-impl -params 0..1 %{
+    evaluate-commands %sh{
+        focus=${1:-false}
+        source_pane=$kak_client_env_TMUX_PANE
+        panes=$(tmux list-panes -t "$source_pane" -F '#{pane_index} #{pane_id}' 2>/dev/null | sort -n)
+        target_pane=$(
+            printf '%s\n' "$panes" |
+                awk -v source="$source_pane" '
+                    NR == 1 { first = $2 }
+                    previous == source { print $2; found = 1; exit }
+                    { previous = $2 }
+                    END { if (!found && previous == source) print first }
+                '
+        )
+
+        if [ -z "$target_pane" ] || [ "$target_pane" = "$source_pane" ]; then
+            printf "fail 'No other tmux pane in this window'\n"
+            exit 0
+        fi
+
+        target=$(tmux show-options -p -v -t "$target_pane" @kak_client 2>/dev/null || true)
+        pane_command=$(tmux display-message -p -t "$target_pane" '#{pane_current_command}')
+        case "$target:$pane_command" in
+            ed-[0-9]*:kak) ;;
+            *)
+                case "$pane_command" in
+                    sh|bash|zsh|fish)
+                        tmux send-keys -t "$target_pane" kak Enter
+                        attempts=0
+                        while [ "$attempts" -lt 40 ]; do
+                            target=$(tmux show-options -p -v -t "$target_pane" @kak_client 2>/dev/null || true)
+                            pane_command=$(tmux display-message -p -t "$target_pane" '#{pane_current_command}')
+                            case "$target:$pane_command" in ed-[0-9]*:kak) break ;; esac
+                            sleep 0.05
+                            attempts=$((attempts + 1))
+                        done
+                        sleep 0.2
+                        ;;
+                    *)
+                        printf "fail 'Target tmux pane is running %s'\n" "$pane_command"
+                        exit 0
+                        ;;
+                esac
+                ;;
+        esac
+
+        case "$target:$pane_command" in
+            ed-[0-9]*:kak) ;;
+            *) printf "fail 'Kakoune did not start in target tmux pane'\n"; exit 0 ;;
+        esac
+
+        session=$kak_session
+        buffer=$kak_bufname
+        (
+            sleep 0.2
+            kakquote() {
+                printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+            }
+            printf 'evaluate-commands -client %s -verbatim -- buffer %s\n' \
+                "$(kakquote "$target")" "$(kakquote "$buffer")" |
+                kak -p "$session"
+            if [ "$focus" = true ]; then
+                tmux select-pane -t "$target_pane"
+            fi
+        ) </dev/null >/dev/null 2>&1 &
+    }
+}
+
+define-command kak-send-next -docstring 'show the current buffer in the next tmux pane' %{
+    kak-send-next-impl
+}
+
+define-command kak-send-next-focus \
+    -docstring 'show the current buffer in the next tmux pane and focus it' %{
+    kak-send-next-impl true
+}
+
+define-command -hidden fzf-check %{
+    evaluate-commands %sh{
+        command -v tmux >/dev/null 2>&1 || {
+            printf "fail 'tmux is required for fzf popup commands'\n"
+            exit 0
+        }
+        command -v fzf >/dev/null 2>&1 || {
+            printf "fail 'fzf is required for fzf popup commands'\n"
+            exit 0
+        }
+        command -v rg >/dev/null 2>&1 || {
+            printf "fail 'ripgrep is required for fzf popup commands'\n"
+            exit 0
+        }
+    }
+}
+
+define-command fzf-file -docstring 'find and edit a file with fzf' %{
+    fzf-check
+    evaluate-commands %sh{
+        root=$(tmux display-message -p -t "$kak_client_env_TMUX_PANE" \
+            '#{session_path}' 2>/dev/null || true)
+        if [ -z "$root" ] || [ ! -d "$root" ]; then
+            buffer_dir=${kak_buffile%/*}
+            if [ -z "$kak_buffile" ]; then
+                buffer_dir=$(pwd -P)
+            elif [ "$buffer_dir" = "$kak_buffile" ]; then
+                buffer_dir=.
+            fi
+            buffer_dir=$(cd "$buffer_dir" 2>/dev/null && pwd -P) || buffer_dir=$(pwd -P)
+            root=$(git -C "$buffer_dir" rev-parse --show-toplevel 2>/dev/null || true)
+            [ -n "$root" ] || root=$buffer_dir
+        fi
+        choice=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-file.XXXXXX") || exit 0
+        trap 'rm -f "$choice"' EXIT HUP INT TERM
+
+        tmux display-popup -E -w 85% -h 85% -d "$root" \
+            "rg --files --hidden --glob '!.git' | fzf --prompt='Files> ' --preview='sed -n \"1,240p\" -- {}' > '$choice'"
+
+        file=$(cat "$choice")
+        [ -n "$file" ] || exit 0
+        case "$file" in /*) ;; *) file=$root/$file ;; esac
+        printf "edit '%s'\n" "$(printf '%s' "$file" | sed "s/'/''/g")"
+    }
+}
+
+define-command fzf-grep -docstring 'live-search project text with rg and fzf' %{
+    fzf-check
+    evaluate-commands %sh{
+        root=$(tmux display-message -p -t "$kak_client_env_TMUX_PANE" \
+            '#{session_path}' 2>/dev/null || true)
+        if [ -z "$root" ] || [ ! -d "$root" ]; then
+            buffer_dir=${kak_buffile%/*}
+            if [ -z "$kak_buffile" ]; then
+                buffer_dir=$(pwd -P)
+            elif [ "$buffer_dir" = "$kak_buffile" ]; then
+                buffer_dir=.
+            fi
+            buffer_dir=$(cd "$buffer_dir" 2>/dev/null && pwd -P) || buffer_dir=$(pwd -P)
+            root=$(git -C "$buffer_dir" rev-parse --show-toplevel 2>/dev/null || true)
+            [ -n "$root" ] || root=$buffer_dir
+        fi
+        choice=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-grep.XXXXXX") || exit 0
+        trap 'rm -f "$choice"' EXIT HUP INT TERM
+
+        tmux display-popup -E -w 90% -h 85% -d "$root" \
+            "fzf --ansi --disabled --prompt='Grep> ' --delimiter=: --nth=4.. --bind='start:reload:rg --column --line-number --no-heading --color=always --smart-case --hidden --glob \"!.git\" -- {q} || true' --bind='change:reload:rg --column --line-number --no-heading --color=always --smart-case --hidden --glob \"!.git\" -- {q} || true' --preview='sed -n \"{2}p\" -- {1}' --preview-window='up,3,border-bottom' > '$choice'"
+
+        result=$(sed $'s/\\033\\[[0-9;]*m//g' "$choice")
+        [ -n "$result" ] || exit 0
+        file=${result%%:*}
+        rest=${result#*:}
+        line=${rest%%:*}
+        rest=${rest#*:}
+        column=${rest%%:*}
+        case "$file" in /*) ;; *) file=$root/$file ;; esac
+        printf "edit '%s' %s %s\n" \
+            "$(printf '%s' "$file" | sed "s/'/''/g")" "$line" "$column"
+    }
+}
+
+define-command fzf-buffer -docstring 'switch buffers with fzf' %{
+    fzf-check
+    evaluate-commands %sh{
+        candidates=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-buffers.XXXXXX") || exit 0
+        choice=$(mktemp "${TMPDIR:-/tmp}/kak-fzf-buffer.XXXXXX") || {
+            rm -f "$candidates"
+            exit 0
+        }
+        trap 'rm -f "$candidates" "$choice"' EXIT HUP INT TERM
+
+        eval set -- "$kak_quoted_buflist"
+        printf '%s\n' "$@" > "$candidates"
+        tmux display-popup -E -w 75% -h 70% \
+            "fzf --prompt='Buffers> ' < '$candidates' > '$choice'"
+
+        buffer=$(cat "$choice")
+        [ -n "$buffer" ] || exit 0
+        printf "buffer '%s'\n" "$(printf '%s' "$buffer" | sed "s/'/''/g")"
     }
 }
 
 evaluate-commands %sh{
     if command -v kak-lsp >/dev/null 2>&1; then
-        printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
-        printf 'hook global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
+        lsp_needs_init=false
+        if [ "${kak_opt_lsp_pid_file+x}" != x ]; then
+            lsp_needs_init=true
+            printf 'try %%{\n'
+            printf 'eval %%sh{kak-lsp --kakoune -s $kak_session}\n'
+        fi
+        printf 'try %%{ remove-hooks global dotfiles-lsp-config }\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=(?:c|cpp|objc) %%{\n'
         printf '    set-option buffer lsp_servers %%{\n'
         printf '        [clangd]\n'
         printf '        args = ["--log=error", "--background-index"]\n'
@@ -34,173 +327,43 @@ evaluate-commands %sh{
         printf '        root_globs = ["compile_commands.json", ".clangd", ".git", ".hg"]\n'
         printf '    }\n'
         printf '}\n'
-        printf 'lsp-enable\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=php %%{\n'
+        printf '    set-option buffer lsp_servers %%{\n'
+        printf '        [intelephense]\n'
+        printf '        command = "intelephense"\n'
+        printf '        args = ["--stdio"]\n'
+        printf '        root_globs = ["composer.json", ".htaccess", ".git", ".hg"]\n'
+        printf '    }\n'
+        printf '}\n'
+        printf 'hook -group dotfiles-lsp-config global User LSPDefaultConfig=python %%{\n'
+        printf '    set-option buffer lsp_servers %%{\n'
+        printf '        [basedpyright]\n'
+        printf '        command = "basedpyright-langserver"\n'
+        printf '        args = ["--stdio"]\n'
+        printf '        root_globs = ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg", "requirements.txt", "uv.lock", "poetry.lock", ".git", ".hg"]\n'
+        printf '        [ruff]\n'
+        printf '        command = "ruff"\n'
+        printf '        args = ["server", "--quiet"]\n'
+        printf '        root_globs = ["pyproject.toml", "ruff.toml", ".ruff.toml", "setup.py", "setup.cfg", "uv.lock", "poetry.lock", ".git", ".hg"]\n'
+        printf '        settings_section = "_"\n'
+        printf '        [ruff.settings._.globalSettings]\n'
+        printf '        organizeImports = true\n'
+        printf '        fixAll = true\n'
+        printf '    }\n'
+        printf '}\n'
+        if [ "$lsp_needs_init" = true ]; then
+            printf 'lsp-enable\n'
+            printf '} catch %%{\n'
+            printf '    echo -debug -- "LSP initialization failed:" %%val{error}\n'
+            printf '    try %%{ lsp-if-running lsp-exit }\n'
+            printf '    try %%{ remove-hooks global lsp }\n'
+            printf '    try %%{ remove-hooks global lsp-breadcrumbs }\n'
+            printf '    try %%{ remove-hooks global dotfiles-lsp-config }\n'
+            printf '    echo -markup "{Warning}LSP initialization failed; continuing without LSP (see *debug*)"\n'
+            printf '}\n'
+        fi
         printf 'try %%{ remove-highlighter global/lsp_semantic_tokens_ranges }\n'
     fi
-}
-
-declare-option -hidden bool lsp_snippets_suppress_completion false
-set-option global lsp_completion_trigger %{
-    evaluate-commands %sh{
-        if [ "$kak_opt_lsp_snippets_suppress_completion" = true ]; then
-            printf "fail 'LSP completion suppressed in snippet placeholders'\n"
-        else
-            printf "execute-keys '<a-h><a-k>\\S.\\z<ret>'\n"
-        fi
-    }
-}
-
-define-command -override lsp-snippets-select-next-placeholders %{
-    execute-keys -with-hooks i<backspace>
-    update-option window lsp_snippets_placeholders
-    evaluate-commands %sh{
-        eval set -- "$kak_quoted_opt_lsp_snippets_placeholder_groups"
-        if [ $# -eq 0 ]; then
-            printf 'lsp-snippets-clear-restore-state\n'
-            printf "fail 'There are no next placeholders'"
-            exit
-        fi
-        next_id=9999
-        second_next_id=9999
-        for placeholder_id do
-            if [ "$placeholder_id" -lt "$next_id" ]; then
-                second_next_id="$next_id"
-                next_id="$placeholder_id"
-            elif [ "$placeholder_id" -lt "$second_next_id" ] && [ "$placeholder_id" -ne "$next_id" ]; then
-                second_next_id="$placeholder_id"
-            fi
-        done
-        next_descs_id=''
-        second_next_descs_id=''
-        desc_id=0
-        printf 'set-option window lsp_snippets_placeholder_groups'
-        for placeholder_id do
-            if [ "$placeholder_id" -eq "$next_id" ]; then
-                next_descs_id="${next_descs_id} $desc_id"
-            else
-                printf ' %s' "$placeholder_id"
-            fi
-            if [ "$placeholder_id" -eq "$second_next_id" ]; then
-                second_next_descs_id="${second_next_descs_id} $desc_id"
-            fi
-            desc_id=$((desc_id+1))
-        done
-        printf '\n'
-
-        eval set -- "$kak_quoted_opt_lsp_snippets_placeholders"
-        printf 'set-option window lsp_snippets_placeholders'
-        printf ' %s' "$1"
-        shift
-        selections=''
-        desc_id=0
-        for desc do
-            found=0
-            for candidate_desc_id in $next_descs_id; do
-                if [ "$candidate_desc_id" -eq "$desc_id" ]; then
-                    found=1
-                    selections="${selections} ${desc%%\|*}"
-                    break
-                fi
-            done
-            if [ $found -eq 0 ]; then
-                for candidate_desc_id in $second_next_descs_id; do
-                    if [ "$candidate_desc_id" -eq "$desc_id" ]; then
-                        found=1
-                        printf ' %s' "${desc%%\|*}|SnippetsNextPlaceholders"
-                        break
-                    fi
-                done
-                if [ $found -eq 0 ]; then
-                    printf ' %s' "$desc"
-                fi
-            fi
-            desc_id=$((desc_id+1))
-        done
-        printf '\n'
-
-        printf "select %s\n" "$selections"
-    }
-    set-option window lsp_snippets_suppress_completion true
-    set-option window lsp_snippets_last_text %val{selections}
-    execute-keys '<a-;>d'
-    lsp-snippets-record-restore
-}
-
-declare-option -hidden str lsp_snippets_restore_commands ''
-declare-option -hidden str lsp_snippets_last_text ''
-
-define-command -hidden lsp-snippets-capture-current-placeholder %{
-    update-option window lsp_snippets_placeholders
-    evaluate-commands %sh{
-        [ -n "$kak_quoted_opt_lsp_snippets_placeholder_groups" ] || exit 0
-        kakquote() {
-            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
-        }
-        printf 'set-option window lsp_snippets_last_text %s\n' \
-            "$(kakquote "$kak_selections")"
-    }
-    lsp-snippets-record-restore
-}
-
-define-command -hidden lsp-snippets-record-restore %{
-    evaluate-commands %sh{
-        text=$kak_opt_lsp_snippets_last_text
-        kakquote() {
-            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
-        }
-        shquote() {
-            printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
-        }
-        new_cmd=$(
-            printf 'select %s\n' "$(kakquote "$kak_selections_desc")"
-            printf 'evaluate-commands %%sh{\n'
-            printf 'marker=%s\n' "$(shquote "$kak_selections")"
-            printf '[ "$kak_selections" = "$marker" ] || exit 0\n'
-            printf 'printf "set-register z %s\\n"\n' "$(kakquote "$text")"
-            printf "printf 'execute-keys -with-hooks <esc>\\\"zP\\\\n'\n"
-            printf '}\n'
-        )
-        if [ -n "$kak_opt_lsp_snippets_restore_commands" ]; then
-            new_cmd=$(printf '%s\n%s' "$new_cmd" "$kak_opt_lsp_snippets_restore_commands")
-        fi
-        printf 'set-option window lsp_snippets_restore_commands %s\n' \
-            "$(kakquote "$new_cmd")"
-    }
-}
-
-define-command -hidden lsp-snippets-seed-current-restore %{
-    evaluate-commands %sh{
-        [ -n "$kak_opt_lsp_snippets_restore_commands" ] && exit 0
-        [ -n "$kak_opt_lsp_snippets_last_text" ] || exit 0
-        text=$kak_opt_lsp_snippets_last_text
-        kakquote() {
-            printf "%s" "$1" | sed "s/'/''/g; 1s/^/'/; \$s/\$/'/"
-        }
-        shquote() {
-            printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
-        }
-        new_cmd=$(
-            printf 'select %s\n' "$(kakquote "$kak_selections_desc")"
-            printf 'evaluate-commands %%sh{\n'
-            printf 'marker=%s\n' "$(shquote "$kak_selections")"
-            printf '[ "$kak_selections" = "$marker" ] || exit 0\n'
-            printf 'printf "set-register z %s\\n"\n' "$(kakquote "$text")"
-            printf "printf 'execute-keys -with-hooks <esc>\\\"zP\\\\n'\n"
-            printf '}\n'
-        )
-        printf 'set-option window lsp_snippets_restore_commands %s\n' \
-            "$(kakquote "$new_cmd")"
-    }
-}
-
-define-command -hidden lsp-snippets-clear-restore-state %{
-    set-option window lsp_snippets_restore_commands ''
-    set-option window lsp_snippets_last_text ''
-    set-option window lsp_snippets_suppress_completion false
-}
-
-define-command -hidden lsp-snippets-restore-empty-placeholders %{
-    evaluate-commands %opt{lsp_snippets_restore_commands}
 }
 
 declare-option -hidden str c_symbol_at_cursor %{
@@ -340,19 +503,20 @@ define-command c-hover -docstring 'show C declaration or definition summary, fal
     }
 }
 
-hook global InsertCompletionShow .* %{
-    try %{ unmap window insert <tab> }
-    try %{ unmap window insert <s-tab> }
-    try %{ unmap window insert <ret> }
+try %{ remove-hooks global dotfiles-insert-completion-tab }
+hook -group dotfiles-insert-completion-tab global InsertCompletionShow .* %{
     map window insert <tab> <c-n>
     map window insert <s-tab> <c-p>
-    map window insert <ret> '<c-y><c-o><a-;>:try lsp-snippets-capture-current-placeholder catch %{}<ret>'
 }
 
-hook global InsertCompletionHide .* %{
-    try %{ unmap window insert <tab> }
-    try %{ unmap window insert <s-tab> }
-    try %{ unmap window insert <ret> }
+hook -group dotfiles-insert-completion-tab global InsertCompletionHide .* %{
+    unmap window insert <tab>
+    unmap window insert <s-tab>
+    evaluate-commands %sh{
+        if [ "$kak_opt_filetype" = php ]; then
+            printf "map window insert <tab> '<space><space><space><space>'\n"
+        fi
+    }
 }
 
 map global normal <c-d> '<esc>:c-definition<ret>' -docstring 'go to definition'
@@ -361,12 +525,16 @@ map global normal <c-y> '<esc>:buffer *grep*<ret>' -docstring 'return to referen
 map global normal K '<esc>:c-hover<ret>' -docstring 'show hover'
 map global normal Y ':clipboard-yank<ret>'
 map global normal P ':clipboard-paste<ret>'
-map global insert <ret> '<a-;>:try lsp-snippets-clear-restore-state catch %{}<ret><ret>'
-map global insert <esc> '<a-;>:try lsp-snippets-seed-current-restore catch %{}<ret><a-;>:try lsp-snippets-restore-empty-placeholders catch %{}<ret><a-;>:try lsp-snippets-clear-restore-state catch %{}<ret><c-c>'
-map global insert <tab> '<a-;>:try lsp-snippets-select-next-placeholders catch %{ execute-keys -with-hooks <lt>tab> }<ret>' -docstring 'select next snippet placeholder'
 map global normal <c-n> '<a-n>' -docstring 'select previous search match'
 map global normal <c-/> '<a-/>' -docstring 'select previous search match before each selection'
 map global user i '<a-i>' -docstring 'select surrounding inner object'
+map global user f '<esc>:fzf-file<ret>' -docstring 'find file with fzf'
+map global user g '<esc>:fzf-grep<ret>' -docstring 'search project text with rg and fzf'
+map global user b '<esc>:fzf-buffer<ret>' -docstring 'switch buffer with fzf'
+map global user p '<esc>:file-path<ret>' -docstring 'show current file path'
+map global user o '<esc>:file-path-copy<ret>' -docstring 'copy current file path'
+map global normal <c-t> '<esc>:kak-send-next<ret>' -docstring 'show current buffer in next tmux pane'
+map global normal <c-x> '<esc>:kak-send-next-focus<ret>' -docstring 'show current buffer in next tmux pane and focus it'
 
 hook global WinSetOption filetype=grep %{
     map window normal <c-y> '<c-o>' -docstring 'return to source'
@@ -377,6 +545,8 @@ hook global WinSetOption filetype=grep %{
 
 declare-option str ft42_header_name %sh{ printf '%s' "${USER:-unknown}" }
 declare-option str ft42_header_email %sh{ printf '%s@student.42.fr' "${USER:-unknown}" }
+declare-option bool ft42_header_auto_insert false
+declare-option str ft42_header_auto_dirs ''
 declare-option -hidden bool ft42_header_inserted false
 
 define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
@@ -433,10 +603,6 @@ define-command add-42-header -docstring 'insert 42 header in .c or .h buffer' %{
     }
 }
 
-define-command add42header -docstring 'insert 42 header in .c or .h buffer' %{
-    add-42-header
-}
-
 define-command -hidden update-42-header-timestamp %{
     evaluate-commands -draft -save-regs a %{
         select 1.1,1.80
@@ -465,15 +631,45 @@ define-command -hidden update-42-header-timestamp %{
     }
 }
 
-declare-option -hidden bool auto_42_header false
-
 define-command -hidden add-42-header-if-empty %{
     evaluate-commands %sh{
-        [ "$kak_opt_auto_42_header" = true ] || exit 0
         case "$kak_buffile" in
             *.c|*.h) ;;
             *) exit 0 ;;
         esac
+
+        if [ "$kak_opt_ft42_header_auto_insert" != true ]; then
+            exit 0
+        fi
+
+        in_auto_dir() {
+            [ -n "$kak_buffile" ] || return 1
+            [ -n "$kak_opt_ft42_header_auto_dirs" ] || return 0
+
+            file_dir=${kak_buffile%/*}
+            if command -v realpath >/dev/null 2>&1; then
+                file_dir=$(realpath "$file_dir" 2>/dev/null || printf '%s\n' "$file_dir")
+            fi
+
+            old_ifs=$IFS
+            IFS=:
+            for dir in $kak_opt_ft42_header_auto_dirs; do
+                IFS=$old_ifs
+                [ -n "$dir" ] || continue
+                dir=${dir%/}
+                if command -v realpath >/dev/null 2>&1; then
+                    dir=$(realpath "$dir" 2>/dev/null || printf '%s\n' "$dir")
+                fi
+                case "$file_dir/" in
+                    "$dir"/*) return 0 ;;
+                esac
+                IFS=:
+            done
+            IFS=$old_ifs
+            return 1
+        }
+
+        in_auto_dir || exit 0
 
         if [ ! -e "$kak_buffile" ] || [ ! -s "$kak_buffile" ]; then
             printf 'add-42-header\n'
@@ -481,6 +677,23 @@ define-command -hidden add-42-header-if-empty %{
     }
 }
 
+define-command -hidden source-42-header-local-kak %{
+    evaluate-commands %sh{
+        [ -n "$kak_buffile" ] || exit 0
+
+        printf 'set-option buffer ft42_header_auto_insert false\n'
+        printf 'set-option buffer ft42_header_auto_dirs %%{}\n'
+
+        dir=${kak_buffile%/*}
+        local_kak=$dir/local.kak
+        [ -f "$local_kak" ] || exit 0
+
+        printf 'source %%|%s|\n' "$local_kak"
+    }
+}
+
+hook global BufNewFile .*\.[ch]$ %{ source-42-header-local-kak }
+hook global BufOpenFile .*\.[ch]$ %{ source-42-header-local-kak }
 hook global BufNewFile .*\.[ch]$ %{ add-42-header-if-empty }
 hook global BufOpenFile .*\.[ch]$ %{ add-42-header-if-empty }
 hook global BufWritePre .*\.[ch]$ %{ update-42-header-timestamp }

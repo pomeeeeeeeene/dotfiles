@@ -8,6 +8,8 @@ window-padding-x = 8
 window-padding-y = 8
 
 macos-option-as-alt = false
+keybind = alt+o=esc:o
+keybind = alt+shift+o=esc:O
 scrollback-limit = 100000
 
 theme = tokyonight

@@ -14,21 +14,78 @@ if [ -L "$self" ]; then
   esac
 fi
 
-script_dir=$(cd "$(dirname "$self")" && pwd)
-repo_root=$script_dir
-while [ "$repo_root" != "/" ] && [ ! -f "$repo_root/tools/dotfiles-cli/Cargo.toml" ]; do
-  repo_root=$(dirname "$repo_root")
-done
-if [ ! -f "$repo_root/tools/dotfiles-cli/Cargo.toml" ]; then
-  echo "dotfiles repository root not found from $script_dir" >&2
-  exit 1
-fi
-bin="$repo_root/tools/dotfiles-cli/target/release/kak-session"
+repo_root=$(cd "$(dirname "$self")/.." && pwd)
 
-if [ ! -x "$bin" ]; then
-  echo "dotfiles-cli is not built. Run:" >&2
-  echo "  cargo build --release --manifest-path \"$repo_root/tools/dotfiles-cli/Cargo.toml\"" >&2
-  exit 1
+if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
+  exec kak "$@"
 fi
 
-exec "$bin" "$@"
+tmux_session=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}')
+safe_tmux_session=$(printf '%s' "$tmux_session" | sed 's/[^A-Za-z0-9._-]/_/g')
+kak_session=kak-$safe_tmux_session
+
+kak_session_is_live() {
+  kak -l 2>/dev/null |
+    awk -v session="$kak_session" '$0 == session { found = 1 } END { exit !found }'
+}
+
+stop_stale_kak_lsp() {
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
+    lsp_root=${XDG_RUNTIME_DIR%/}/kakoune-lsp
+  else
+    lsp_root=${TMPDIR:-/tmp}
+    lsp_root=${lsp_root%/}/kakoune-lsp-$(id -un)
+  fi
+  lsp_session_dir=$lsp_root/$kak_session
+  lsp_pid_file=$lsp_session_dir/pid
+
+  [ -r "$lsp_pid_file" ] || return 0
+  lsp_pid=$(sed -n '1p' "$lsp_pid_file")
+  case "$lsp_pid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  kill -0 "$lsp_pid" 2>/dev/null || return 0
+
+  lsp_command=$(ps -p "$lsp_pid" -o command= 2>/dev/null || true)
+  case "$lsp_command" in
+    *kak-lsp*" -s $kak_session "*|*kak-lsp*" --session $kak_session "*) ;;
+    *) return 0 ;;
+  esac
+
+  # A live Kakoune session owns its kak-lsp process. Recheck immediately
+  # before stopping anything to avoid racing another client startup.
+  kak_session_is_live && return 0
+
+  kill -HUP "$lsp_pid"
+  attempts=0
+  while kill -0 "$lsp_pid" 2>/dev/null && [ "$attempts" -lt 40 ]; do
+    sleep 0.05
+    attempts=$((attempts + 1))
+  done
+}
+
+if ! kak_session_is_live; then
+  stop_stale_kak_lsp
+fi
+
+client_number=$(
+  tmux list-panes -t "$TMUX_PANE" -F '#{pane_index} #{pane_id}' \
+    | sort -n \
+    | awk -v pane="$TMUX_PANE" '$2 == pane { print NR; exit }'
+)
+if [ -z "$client_number" ]; then
+  echo "could not determine tmux pane position" >&2
+  exit 1
+fi
+
+kak_client=ed-$client_number
+tmux set-option -p -t "$TMUX_PANE" @kak_client "$kak_client"
+
+expression="rename-client $kak_client"
+if [ -f "$repo_root/kak/glow-sync.kak" ]; then
+  expression="$expression; source '$repo_root/kak/glow-sync.kak'"
+fi
+
+export KAK_SESSION="$kak_session"
+export KAK_SYNC_SCOPE="$safe_tmux_session"
+exec kak -C "$kak_session" -e "$expression" "$@"

@@ -1,5 +1,7 @@
 # tmux with no arguments opens a session scoped to the current directory.
 # tmux with one non-command argument opens that named session.
+alias bat='bat -pp'
+
 tmux() {
   if [[ $# -eq 0 ]]; then
     _tmux_open_session "$(basename "$PWD")"
@@ -31,4 +33,26 @@ _tmux_open_session() {
 
 _tmux_is_command() {
   command tmux list-commands "$1" >/dev/null 2>&1
+}
+
+# Inside tmux, join the session-scoped Kakoune server and register this pane.
+# Outside tmux, keep the normal Kakoune command unchanged.
+kak() {
+  if [[ -n "$TMUX" ]]; then
+    command kak-session "$@"
+  else
+    command kak "$@"
+  fi
+}
+
+# Create the parent directory for a new file before opening it in Kakoune.
+kakm() {
+  if (( $# != 1 )); then
+    print -u2 'usage: kakm <file>'
+    return 2
+  fi
+
+  local parent=${1:h}
+  [[ -d "$parent" ]] || mkdir -p -- "$parent" || return
+  kak "$1"
 }
