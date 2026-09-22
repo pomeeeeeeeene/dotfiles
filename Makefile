@@ -1,10 +1,11 @@
 STOW ?= stow
 HOME_DIR ?= $(HOME)
 
-.PHONY: stow unstow stow-bin stow-ghostty stow-kak stow-yazi unstow-bin unstow-ghostty unstow-kak unstow-yazi
+.PHONY: stow unstow install-fast-syntax-highlighting stow-bin stow-ghostty stow-kak stow-yazi unstow-bin unstow-ghostty unstow-kak unstow-yazi
 
 stow:
 	$(MAKE) stow-bin
+	$(MAKE) install-fast-syntax-highlighting
 	$(MAKE) stow-ghostty
 	$(MAKE) stow-kak
 	$(STOW) tmux
@@ -16,6 +17,9 @@ unstow:
 	$(MAKE) unstow-kak
 	$(STOW) -D tmux
 	$(MAKE) unstow-yazi
+
+install-fast-syntax-highlighting:
+	./install/fast-syntax-highlighting
 
 stow-bin:
 	install -d $(HOME_DIR)/.local/bin

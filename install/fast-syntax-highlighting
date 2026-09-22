@@ -1,0 +1,53 @@
+#!/bin/sh
+
+set -eu
+
+formula='zsh-fast-syntax-highlighting'
+conflicting_formulas='zsh-syntax-highlighting'
+related_formulas='zsh-autosuggestions zsh-history-substring-search'
+
+if ! command -v brew >/dev/null 2>&1; then
+  printf '%s\n' "Homebrew is not installed; skipping ${formula}." >&2
+  exit 0
+fi
+
+if ! brew --version >/dev/null 2>&1; then
+  printf '%s\n' 'Homebrew is installed but not functioning.' >&2
+  exit 1
+fi
+
+if ! installed_formulas=$(brew list --formula --versions 2>/dev/null); then
+  printf '%s\n' 'Failed to inspect installed Homebrew formulas.' >&2
+  printf '%s\n' 'Fix the Homebrew environment and try again.' >&2
+  exit 1
+fi
+
+formula_installed() {
+  printf '%s\n' "$installed_formulas" \
+    | awk -v formula="$1" '$1 == formula { found = 1 } END { exit !found }'
+}
+
+for conflict in $conflicting_formulas; do
+  if formula_installed "$conflict"; then
+    printf '%s\n' "${conflict} is installed; loading both syntax-highlighting plugins may conflict." >&2
+    printf '%s\n' "Uninstall ${conflict} or ensure it is disabled before installing ${formula}." >&2
+    exit 1
+  fi
+done
+
+for related in $related_formulas; do
+  if formula_installed "$related"; then
+    printf '%s\n' "Notice: ${related} is installed; verify the Zsh plugin load order." >&2
+    printf '%s\n' 'Suggested load order for this setup: fast-syntax-highlighting -> autosuggestions -> history-substring-search.' >&2
+  fi
+done
+
+if formula_installed "$formula"; then
+  printf '%s\n' "${formula} is already installed."
+  exit 0
+fi
+
+if ! brew install "$formula"; then
+  printf '%s\n' "Failed to install ${formula}. Check the Homebrew output and try again." >&2
+  exit 1
+fi
