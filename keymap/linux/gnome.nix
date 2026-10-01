@@ -14,7 +14,7 @@ let
     key="xkb-options"
     gsettings="$(command -v gsettings || true)"
     install="${pkgs.coreutils}/bin/install"
-    cmp="${pkgs.coreutils}/bin/cmp"
+    cmp="${pkgs.diffutils}/bin/cmp"
 
     if [ -z "$gsettings" ]; then
       echo "gsettings was not found in PATH."
