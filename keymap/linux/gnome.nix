@@ -12,9 +12,15 @@ let
 
     schema="org.gnome.desktop.input-sources"
     key="xkb-options"
-    gsettings="${pkgs.glib}/bin/gsettings"
+    gsettings="$(command -v gsettings || true)"
     install="${pkgs.coreutils}/bin/install"
     cmp="${pkgs.coreutils}/bin/cmp"
+
+    if [ -z "$gsettings" ]; then
+      echo "gsettings was not found in PATH."
+      exit 1
+    fi
+
     current="$($gsettings get "$schema" "$key")"
     desired="['ctrl:nocaps', 'custom:dotfiles']"
 
