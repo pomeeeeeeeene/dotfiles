@@ -6,7 +6,7 @@ pkgs.writeShellScriptBin "apply-gnome-key-map" ''
   schema="org.gnome.desktop.input-sources"
   key="xkb-options"
 
-  current="$(pkgs.glib}/bin/gsettings get "$schema" "$key")"
+  current="$(${pkgs.glib}/bin/gsettings get "$schema" "$key")"
 
   if [ "$current" != "@as []" ] && [ "$current" != "[]" ]; then
     echo "Existing GNOME xkb-options found:"
