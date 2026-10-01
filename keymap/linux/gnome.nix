@@ -19,4 +19,6 @@ pkgs.writeShellScriptBin "apply-gnome-key-map" ''
     "$schema" \
     "$key" \
     "['ctrl:nocaps']"
+
+  echo "Applied GNOME keymap: ctrl:nocaps"
   ''
