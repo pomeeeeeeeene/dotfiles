@@ -1,8 +1,8 @@
 partial modifier_keys
 xkb_symbols "basic" {
-    replace key <CAPS> { [ Control-L ], type[group1] = "ONE_LEVEL" };
+    replace key <CAPS> { [ Control_L ], type[group1] = "ONE_LEVEL" };
     replace key <LCTL> { [ Escape ], type[group1] = "ONE_LEVEL" };
 
-    modifier_map None { <CAPS> };
+    modifier_map Control { <CAPS> };
     modifier_map None { <LCTL> };
 };
