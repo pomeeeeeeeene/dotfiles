@@ -22,10 +22,10 @@ let
     fi
 
     current="$($gsettings get "$schema" "$key")"
-    desired="['ctrl:nocaps', 'custom:dotfiles']"
+    desired="['custom:dotfiles']"
 
     case "$current" in
-      "@as []"|"[]"|"['ctrl:nocaps']"|"['ctrl:nocaps', 'custom:dotfiles']"|"['custom:dotfiles', 'ctrl:nocaps']")
+      "@as []"|"[]"|"['custom:dotfiles']")
         ;;
       *)
         echo "Existing GNOME xkb-options found:"
@@ -61,7 +61,7 @@ let
       "$key" \
       "$desired"
 
-    echo "Applied GNOME keymap: ctrl:nocaps, custom:dotfiles"
+    echo "Applied GNOME keymap: custom:dotfiles"
   '';
 in
 
